@@ -24,6 +24,7 @@ class WorkerNode(BaseModel):
     status: Literal["healthy", "unhealthy", "unknown"] = "unknown"
     last_seen: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     consecutive_failures: int = 0
+    version: str | None = None
 
 
 class HealthConfig(BaseModel):
@@ -84,6 +85,7 @@ class WorkerNodeResponse(BaseModel):
     host: str
     port: int
     status: str
+    version: str | None = None
     processes: list[ProcessInfoResponse] = Field(default_factory=list)
     memory: MemoryInfoResponse | None = None
 

@@ -65,6 +65,22 @@ def register_worker(req: RegisterRequest, request: Request) -> WorkerNodeRespons
     )
 
 
+@router.delete("/workers/{worker_name}")
+def unregister_worker(worker_name: str, request: Request) -> dict[str, str]:
+    """Remove a worker node from the cluster."""
+    cluster = _get_cluster(request)
+    head_name = _get_head_name(request)
+    if worker_name == head_name:
+        raise HTTPException(
+            status_code=400, detail="Cannot remove the head node"
+        )
+    if cluster.unregister_worker(worker_name):
+        return {"removed": worker_name}
+    raise HTTPException(
+        status_code=404, detail=f"Worker '{worker_name}' not found"
+    )
+
+
 # ── Status ───────────────────────────────────────
 
 
@@ -125,6 +141,7 @@ def cluster_status(request: Request) -> ClusterStatusResponse:
                 host=worker.host,
                 port=worker.port,
                 status=worker.status,
+                version=worker.version,
                 processes=processes,
                 memory=memory,
             )

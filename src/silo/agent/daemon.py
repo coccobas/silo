@@ -85,8 +85,10 @@ def create_agent_app(
             cluster.load_persisted()
 
             # Register self as a worker
+            from silo import __version__
+
             cluster.register_worker(node_name, "127.0.0.1", port)
-            cluster.record_health_success(node_name)
+            cluster.record_health_success(node_name, version=__version__)
 
             # Auto-discover existing workers via mDNS
             try:
@@ -286,6 +288,8 @@ def create_agent_app(
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok", "hostname": platform.node()}
+        from silo import __version__
+
+        return {"status": "ok", "hostname": platform.node(), "version": __version__}
 
     return app

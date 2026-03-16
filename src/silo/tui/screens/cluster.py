@@ -20,6 +20,7 @@ class ClusterScreen(Screen):
         ("s", "spawn", "Spawn"),
         ("x", "stop_model", "Stop"),
         ("d", "download", "Download"),
+        ("delete", "remove_worker", "Remove"),
     ]
 
     # Cache worker names for modals
@@ -36,7 +37,8 @@ class ClusterScreen(Screen):
         yield DataTable(id="cluster-models-table")
         yield Static(
             " [dim]r[/] refresh  [dim]g[/] register  "
-            "[dim]s[/] spawn  [dim]x[/] stop  [dim]d[/] download",
+            "[dim]s[/] spawn  [dim]x[/] stop  [dim]d[/] download  "
+            "[dim]del[/] remove",
             classes="hint-bar",
         )
         yield NavBar(active_screen="cluster")
@@ -44,7 +46,9 @@ class ClusterScreen(Screen):
 
     def on_mount(self) -> None:
         workers = self.query_one("#workers-table", DataTable)
-        workers.add_columns("NAME", "HOST", "PORT", "STATUS", "MEMORY", "MODELS")
+        workers.add_columns(
+            "NAME", "HOST", "PORT", "STATUS", "VERSION", "MEMORY", "MODELS"
+        )
         workers.cursor_type = "row"
 
         models = self.query_one("#cluster-models-table", DataTable)
@@ -77,7 +81,9 @@ class ClusterScreen(Screen):
             self.app.call_from_thread(self._apply_no_head)
             return
 
-        worker_rows: list[tuple[str, str, str, str, str, str]] = []
+        from silo import __version__
+
+        worker_rows: list[tuple[str, str, str, str, str, str, str]] = []
         model_rows: list[tuple[str, str, str, str, str, str]] = []
         worker_names: list[str] = []
         model_names: list[str] = []
@@ -90,6 +96,7 @@ class ClusterScreen(Screen):
             status = w.get("status", "unknown")
             mem = w.get("memory")
             processes = w.get("processes", [])
+            version = w.get("version")
             running_count = sum(
                 1 for p in processes if p.get("status") == "running"
             )
@@ -114,11 +121,20 @@ class ClusterScreen(Screen):
                 "unknown": "yellow",
             }.get(status, "dim")
 
+            # Version display with mismatch warning
+            if version is None:
+                version_display = "[dim]—[/]"
+            elif version != __version__:
+                version_display = f"[red]{version}[/]"
+            else:
+                version_display = f"[green]{version}[/]"
+
             worker_rows.append((
                 w["name"],
                 w.get("host", "—"),
                 str(w.get("port", "—")),
                 f"[{status_color}]{status}[/]",
+                version_display,
                 mem_display,
                 str(running_count),
             ))
@@ -155,7 +171,7 @@ class ClusterScreen(Screen):
 
     def _apply_data(
         self,
-        worker_rows: list[tuple[str, str, str, str, str, str]],
+        worker_rows: list[tuple[str, str, str, str, str, str, str]],
         model_rows: list[tuple[str, str, str, str, str, str]],
         running_count: int,
         worker_count: int,
@@ -173,11 +189,13 @@ class ClusterScreen(Screen):
 
         workers_t = self.query_one("#workers-table", DataTable)
         workers_t.clear()
-        for name, host, port, status, mem, models in worker_rows:
-            workers_t.add_row(f"[bold]{name}[/]", host, port, status, mem, models)
+        for name, host, port, status, version, mem, models in worker_rows:
+            workers_t.add_row(
+                f"[bold]{name}[/]", host, port, status, version, mem, models
+            )
         if not worker_rows:
             workers_t.add_row(
-                "[dim]—[/]", "—", "—", "—", "—",
+                "[dim]—[/]", "—", "—", "—", "—", "—",
                 "[dim]No workers registered[/]",
             )
 
@@ -203,7 +221,7 @@ class ClusterScreen(Screen):
         workers_t = self.query_one("#workers-table", DataTable)
         workers_t.clear()
         workers_t.add_row(
-            "[red]No head node[/]", "—", "—", "—", "—",
+            "[red]No head node[/]", "—", "—", "—", "—", "—",
             "[dim]Start a node with --head[/]",
         )
 
@@ -409,6 +427,58 @@ class ClusterScreen(Screen):
             self.app.call_from_thread(
                 self.notify,
                 f"Download failed: {exc}",
+                severity="error",
+            )
+
+        self._load_data()
+
+    # ── Remove ────────────────────────────────────────
+
+    def action_remove_worker(self) -> None:
+        """Remove the selected worker from the cluster."""
+        workers_t = self.query_one("#workers-table", DataTable)
+        if workers_t.cursor_row is None or workers_t.row_count == 0:
+            return
+        if not self._worker_names:
+            return
+
+        row_idx = workers_t.cursor_row
+        if row_idx >= len(self._worker_names):
+            return
+        worker_name = self._worker_names[row_idx]
+
+        from silo.tui.widgets.confirm_modal import ConfirmModal
+
+        def on_confirm(confirmed: bool) -> None:
+            if confirmed:
+                self._do_remove(worker_name)
+
+        self.app.push_screen(
+            ConfirmModal(f"Remove worker '{worker_name}'?"), on_confirm
+        )
+
+    @work(thread=True)
+    def _do_remove(self, worker_name: str) -> None:
+        import urllib.request
+
+        head_url = self._get_head_url()
+        if head_url is None:
+            return
+
+        try:
+            req = urllib.request.Request(
+                f"{head_url}/cluster/workers/{worker_name}",
+                method="DELETE",
+            )
+            with urllib.request.urlopen(req, timeout=5):
+                pass
+            self.app.call_from_thread(
+                self.notify, f"Removed worker '{worker_name}'"
+            )
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.notify,
+                f"Remove failed: {exc}",
                 severity="error",
             )
 

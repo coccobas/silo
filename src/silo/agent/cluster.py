@@ -131,7 +131,9 @@ class ClusterState:
         """Get only workers with status 'healthy'."""
         return tuple(w for w in self._workers.values() if w.status == "healthy")
 
-    def record_health_success(self, name: str) -> WorkerNode:
+    def record_health_success(
+        self, name: str, version: str | None = None
+    ) -> WorkerNode:
         """Mark a worker as healthy, reset failure count.
 
         Raises KeyError if worker not registered.
@@ -144,6 +146,7 @@ class ClusterState:
             status="healthy",
             last_seen=datetime.now(UTC),
             consecutive_failures=0,
+            version=version or existing.version,
         )
         self._workers[name] = updated
         return updated
@@ -328,13 +331,25 @@ class HealthChecker:
 
     async def _check_one_worker(self, name: str, host: str, port: int) -> None:
         """Check a single worker in a thread to avoid blocking the event loop."""
+        from silo import __version__
+
         loop = asyncio.get_running_loop()
         try:
             client = self._client_factory(name, host, port)
-            await loop.run_in_executor(
+            result = await loop.run_in_executor(
                 None, client._get, "/health"  # type: ignore[union-attr]
             )
-            self._cluster.record_health_success(name)
+            worker_version = None
+            if isinstance(result, dict):
+                worker_version = result.get("version")
+                if worker_version and worker_version != __version__:
+                    logger.warning(
+                        "Version mismatch: worker '%s' runs %s, head runs %s",
+                        name,
+                        worker_version,
+                        __version__,
+                    )
+            self._cluster.record_health_success(name, version=worker_version)
         except KeyError:
             pass  # Worker was unregistered during iteration
         except Exception:
