@@ -113,8 +113,7 @@ def _start_agent_daemon(
     thread.start()
 
     # Wait for the agent to be fully ready (lifespan complete)
-    # For head mode, verify /cluster/status is reachable
-    check_path = "/cluster/status" if head else "/health"
+    check_path = "/health"
     ready = False
     for _ in range(100):
         if startup_error:

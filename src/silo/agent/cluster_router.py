@@ -83,38 +83,41 @@ def cluster_status(request: Request) -> ClusterStatusResponse:
     for worker in workers:
         processes: list[ProcessInfoResponse] = []
         memory: MemoryInfoResponse | None = None
-        try:
-            if worker.name == head_name:
-                client = LocalClient()
-            else:
-                client = _build_client(worker.name, worker.host, worker.port)
-            procs = client.list_processes()
-            processes = [
-                ProcessInfoResponse(
-                    name=p.name, pid=p.pid, port=p.port,
-                    repo_id=p.repo_id, status=p.status,
+
+        # Only query workers that are healthy or are the head itself
+        # to avoid blocking on unreachable workers
+        if worker.status == "healthy" or worker.name == head_name:
+            try:
+                if worker.name == head_name:
+                    client = LocalClient()
+                else:
+                    client = _build_client(worker.name, worker.host, worker.port)
+                procs = client.list_processes()
+                processes = [
+                    ProcessInfoResponse(
+                        name=p.name, pid=p.pid, port=p.port,
+                        repo_id=p.repo_id, status=p.status,
+                    )
+                    for p in procs
+                ]
+                mem = client.memory()
+                memory = MemoryInfoResponse(
+                    total_gb=mem.total_gb,
+                    available_gb=mem.available_gb,
+                    used_gb=mem.used_gb,
+                    pressure=mem.pressure,
+                    usage_percent=mem.usage_percent,
                 )
-                for p in procs
-            ]
-            mem = client.memory()
-            memory = MemoryInfoResponse(
-                total_gb=mem.total_gb,
-                available_gb=mem.available_gb,
-                used_gb=mem.used_gb,
-                pressure=mem.pressure,
-                usage_percent=mem.usage_percent,
-            )
-            total_models += len(processes)
-            total_memory += mem.total_gb
-            total_available += mem.available_gb
-        except Exception:
-            logger.warning(
-                "Could not query worker '%s' at %s:%d",
-                worker.name,
-                worker.host,
-                worker.port,
-                exc_info=True,
-            )
+                total_models += len(processes)
+                total_memory += mem.total_gb
+                total_available += mem.available_gb
+            except Exception:
+                logger.warning(
+                    "Could not query worker '%s' at %s:%d",
+                    worker.name,
+                    worker.host,
+                    worker.port,
+                )
 
         worker_responses.append(
             WorkerNodeResponse(
