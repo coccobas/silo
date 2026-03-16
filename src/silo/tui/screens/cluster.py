@@ -50,9 +50,9 @@ class ClusterScreen(Screen):
 
     @work(thread=True)
     def _load_data(self) -> None:
+        import json
         import urllib.error
         import urllib.request
-        import json
 
         head_url = self._get_head_url()
         if head_url is None:
@@ -225,8 +225,13 @@ class ClusterScreen(Screen):
         self._load_data()
 
     def _get_head_url(self) -> str | None:
-        """Find the head node URL from config or discovery."""
+        """Find the head node URL from config or app state."""
         try:
+            # If the TUI was launched with --head, use that port
+            head_port = getattr(self.app, "agent_head_port", None)
+            if head_port is not None:
+                return f"http://127.0.0.1:{head_port}"
+
             from silo.config.loader import load_config
 
             config = load_config()

@@ -41,13 +41,17 @@ def create_agent_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        import asyncio
+
+        loop = asyncio.get_running_loop()
         advertiser = None
         if node_name is not None:
             try:
                 from silo.agent.discovery import ServiceAdvertiser
 
                 advertiser = ServiceAdvertiser(node_name=node_name, port=port)
-                advertiser.__enter__()
+                # Zeroconf does blocking I/O — run in thread
+                await loop.run_in_executor(None, advertiser.__enter__)
             except ImportError:
                 logger.debug(
                     "zeroconf not installed, skipping mDNS advertisement"

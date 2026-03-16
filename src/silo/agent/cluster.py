@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from silo.agent.cluster_schemas import HealthConfig, WorkerNode
 
@@ -39,7 +39,7 @@ class ClusterState:
             host=host,
             port=port,
             status=existing.status if existing else "unknown",
-            last_seen=existing.last_seen if existing else datetime.now(timezone.utc),
+            last_seen=existing.last_seen if existing else datetime.now(UTC),
             consecutive_failures=(
                 existing.consecutive_failures if existing else 0
             ),
@@ -79,7 +79,7 @@ class ClusterState:
             host=existing.host,
             port=existing.port,
             status="healthy",
-            last_seen=datetime.now(timezone.utc),
+            last_seen=datetime.now(UTC),
             consecutive_failures=0,
         )
         self._workers[name] = updated
@@ -257,9 +257,13 @@ async def auto_discover_workers(
 
     Returns the number of workers registered.
     """
+    import asyncio
+
     from silo.agent.discovery import discover_nodes
 
-    nodes = discover_nodes(timeout=timeout)
+    # discover_nodes uses blocking time.sleep, so run in a thread
+    loop = asyncio.get_running_loop()
+    nodes = await loop.run_in_executor(None, discover_nodes, timeout)
     count = 0
     for node in nodes:
         if exclude_name and node.name == exclude_name:
