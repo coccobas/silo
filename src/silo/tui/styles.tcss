@@ -1,0 +1,255 @@
+/* Silo TUI — shared styles */
+
+Screen {
+    layout: vertical;
+}
+
+/* ── Status counts bar ────────────────────────── */
+#status-counts {
+    height: 1;
+    background: $accent;
+    color: $text;
+    padding: 0 1;
+}
+
+/* ── DataTable defaults ───────────────────────── */
+DataTable {
+    height: 1fr;
+}
+
+DataTable > .datatable--cursor {
+    background: $accent 40%;
+}
+
+/* ── Log viewer ───────────────────────────────── */
+#log-viewer {
+    height: 10;
+    border-top: solid $accent;
+    padding: 0 1;
+}
+
+/* ── Section titles ───────────────────────────── */
+.section-title {
+    height: 1;
+    background: $surface;
+    color: $text-muted;
+    padding: 0 1;
+    text-style: bold;
+}
+
+/* ── Quick-action hints ───────────────────────── */
+.hint-bar {
+    height: 1;
+    background: $surface;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+/* ── Confirm modal ────────────────────────────── */
+ConfirmModal {
+    align: center middle;
+}
+
+ConfirmModal > #dialog {
+    width: 50;
+    height: auto;
+    max-height: 12;
+    border: thick $accent;
+    background: $surface;
+    padding: 1 2;
+}
+
+ConfirmModal > #dialog > #question {
+    width: 100%;
+    text-align: center;
+    margin-bottom: 1;
+}
+
+ConfirmModal > #dialog > #buttons {
+    width: 100%;
+    height: auto;
+    align-horizontal: center;
+}
+
+ConfirmModal > #dialog > #buttons > Button {
+    margin: 0 1;
+}
+
+/* ── Detail panel ─────────────────────────────── */
+.detail-panel {
+    height: auto;
+    max-height: 8;
+    border-top: solid $accent;
+    padding: 0 1;
+}
+
+/* ── Models screen tabs ───────────────────────── */
+#models-tabs {
+    height: 1fr;
+}
+
+/* ── Convert form ─────────────────────────────── */
+.form-row {
+    height: 3;
+    layout: horizontal;
+}
+
+.form-row > Label {
+    width: 15;
+    height: 3;
+    content-align-vertical: middle;
+    padding: 0 1;
+}
+
+.form-row > Input {
+    width: 1fr;
+}
+
+.form-row > Select {
+    width: 1fr;
+}
+
+/* ── Serve modal ─────────────────────────────── */
+ServeModal {
+    align: center middle;
+}
+
+ServeModal > #serve-dialog {
+    width: 72;
+    height: 85%;
+    border: thick $accent;
+    background: $surface;
+    padding: 1 2;
+}
+
+ServeModal #serve-title {
+    width: 100%;
+    text-align: center;
+    text-style: bold;
+    margin-bottom: 1;
+    height: 1;
+}
+
+ServeModal #serve-scroll {
+    height: 1fr;
+}
+
+ServeModal .serve-section {
+    height: 1;
+    margin-top: 1;
+}
+
+ServeModal #buttons {
+    width: 100%;
+    height: 3;
+    align-horizontal: center;
+    margin-top: 1;
+}
+
+ServeModal #buttons > Button {
+    margin: 0 1;
+}
+
+ServeModal .form-row > Checkbox {
+    width: 1fr;
+    height: 3;
+}
+
+ServeModal .serve-hint {
+    height: 1;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+/* ── Download modal ──────────────────────────── */
+DownloadModal {
+    align: center middle;
+}
+
+DownloadModal > #dialog {
+    width: 60;
+    height: auto;
+    max-height: 14;
+    border: thick $accent;
+    background: $surface;
+    padding: 1 2;
+}
+
+DownloadModal > #dialog > #question {
+    width: 100%;
+    text-align: center;
+    margin-bottom: 1;
+}
+
+DownloadModal > #dialog > #buttons {
+    width: 100%;
+    height: auto;
+    align-horizontal: center;
+}
+
+DownloadModal > #dialog > #buttons > Button {
+    margin: 0 1;
+}
+
+/* ── Search pagination bar ────────────────────── */
+.page-bar {
+    height: 3;
+    align-horizontal: center;
+}
+
+.page-bar > Button {
+    margin: 0 1;
+    min-width: 10;
+}
+
+.page-bar > #page-indicator {
+    width: auto;
+    height: 3;
+    content-align: center middle;
+    color: $text-muted;
+}
+
+/* ── Register modal ──────────────────────────── */
+RegisterModal {
+    align: center middle;
+}
+
+RegisterModal > #dialog {
+    width: 55;
+    height: auto;
+    max-height: 18;
+    border: thick $accent;
+    background: $surface;
+    padding: 1 2;
+}
+
+RegisterModal > #dialog > #question {
+    width: 100%;
+    text-align: center;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+RegisterModal > #dialog > #buttons {
+    width: 100%;
+    height: auto;
+    align-horizontal: center;
+    margin-top: 1;
+}
+
+RegisterModal > #dialog > #buttons > Button {
+    margin: 0 1;
+}
+
+/* ── Doctor check colors ──────────────────────── */
+.check-ok {
+    color: $success;
+}
+
+.check-warn {
+    color: $warning;
+}
+
+.check-fail {
+    color: $error;
+}
