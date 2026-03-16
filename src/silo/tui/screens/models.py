@@ -229,10 +229,12 @@ class ModelsScreen(Screen):
         if repo_id.startswith("["):
             return  # placeholder row
 
+        from silo.config.serve_settings import load_settings
         from silo.registry.store import Registry
 
         entry = Registry.load().get(repo_id)
         model_format = str(entry.format) if entry else "unknown"
+        saved = load_settings(repo_id)
 
         def on_serve(settings: ServeSettings | None) -> None:
             if settings is None:
@@ -240,7 +242,8 @@ class ModelsScreen(Screen):
             self._do_serve(repo_id, settings)
 
         self.app.push_screen(
-            ServeModal(repo_id, model_format=model_format), on_serve
+            ServeModal(repo_id, model_format=model_format, saved=saved),
+            on_serve,
         )
 
     @work(thread=True)
@@ -248,6 +251,7 @@ class ModelsScreen(Screen):
         import time
 
         from silo.config.paths import LOGS_DIR
+        from silo.config.serve_settings import save_settings
         from silo.process.manager import spawn_model
         from silo.process.pid import is_running
 
@@ -285,6 +289,7 @@ class ModelsScreen(Screen):
                 )
                 return
 
+            save_settings(repo_id, settings)
             self.app.call_from_thread(
                 self.notify,
                 f"Started {settings.name} (PID {pid}) on port {settings.port}",

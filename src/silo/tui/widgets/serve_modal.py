@@ -9,7 +9,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, Label, Select, Static
 
-
 # ── Format → runtime mapping ───────────────────────────────────────────
 
 _FORMAT_RUNTIMES: dict[str, list[tuple[str, str]]] = {
@@ -138,22 +137,33 @@ class ServeModal(ModalScreen[ServeSettings | None]):
         repo_id: str,
         default_port: int = 8800,
         model_format: str = "unknown",
+        saved: dict | None = None,
     ) -> None:
         super().__init__()
         self._repo_id = repo_id
         self._default_port = default_port
         self._model_format = model_format
+        self._saved = saved or {}
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
+    def _s(self, key: str, default):
+        """Get a saved value or fall back to default."""
+        return self._saved.get(key, default)
+
     def compose(self) -> ComposeResult:
-        default_name = self._repo_id.split("/")[-1].lower().replace(" ", "-")
+        s = self._s
+        default_name = s(
+            "name",
+            self._repo_id.split("/")[-1].lower().replace(" ", "-"),
+        )
         runtimes = _FORMAT_RUNTIMES.get(
             self._model_format, _FORMAT_RUNTIMES["unknown"]
         )
-        default_runtime = runtimes[0][1]
-        default_ctx = 4096 if self._model_format == "gguf" else 8192
+        default_runtime = s("runtime", runtimes[0][1])
+        fallback_ctx = 4096 if self._model_format == "gguf" else 8192
+        default_ctx = s("context_length", fallback_ctx)
 
         with Vertical(id="serve-dialog"):
             yield Static(
@@ -167,13 +177,18 @@ class ServeModal(ModalScreen[ServeSettings | None]):
                 yield Static("[b dim]Server[/]", classes="serve-section")
                 with Horizontal(classes="form-row"):
                     yield Label("Name:")
-                    yield Input(value=default_name, id="serve-name")
+                    yield Input(value=str(default_name), id="serve-name")
                 with Horizontal(classes="form-row"):
                     yield Label("Host:")
-                    yield Input(value="127.0.0.1", id="serve-host")
+                    yield Input(
+                        value=str(s("host", "127.0.0.1")), id="serve-host"
+                    )
                 with Horizontal(classes="form-row"):
                     yield Label("Port:")
-                    yield Input(value=str(self._default_port), id="serve-port")
+                    yield Input(
+                        value=str(s("port", self._default_port)),
+                        id="serve-port",
+                    )
                 with Horizontal(classes="form-row"):
                     yield Label("Runtime:")
                     yield Select(
@@ -189,7 +204,7 @@ class ServeModal(ModalScreen[ServeSettings | None]):
                             ("Info", "info"),
                             ("Debug", "debug"),
                         ],
-                        value="warning",
+                        value=s("log_level", "warning"),
                         id="serve-log-level",
                     )
                 with Horizontal(classes="form-row"):
@@ -200,12 +215,14 @@ class ServeModal(ModalScreen[ServeSettings | None]):
                             ("Always", "always"),
                             ("Never", "never"),
                         ],
-                        value="on-failure",
+                        value=s("restart", "on-failure"),
                         id="serve-restart",
                     )
                 with Horizontal(classes="form-row"):
                     yield Label("Timeout (s):")
-                    yield Input(value="120", id="serve-timeout")
+                    yield Input(
+                        value=str(s("timeout", 120)), id="serve-timeout"
+                    )
 
                 # ── Context (LLM only) ──
                 yield Static(
@@ -220,7 +237,10 @@ class ServeModal(ModalScreen[ServeSettings | None]):
                     )
                 with Horizontal(classes="form-row", id="gpu-layers-row"):
                     yield Label("GPU layers:")
-                    yield Input(value="-1", id="serve-n-gpu-layers")
+                    yield Input(
+                        value=str(s("n_gpu_layers", -1)),
+                        id="serve-n-gpu-layers",
+                    )
                 yield Static(
                     "[dim]-1 = all on GPU, 0 = CPU only[/]",
                     classes="serve-hint",
@@ -235,25 +255,42 @@ class ServeModal(ModalScreen[ServeSettings | None]):
                 )
                 with Horizontal(classes="form-row", id="gen-max-tokens"):
                     yield Label("Max tokens:")
-                    yield Input(value="512", id="serve-max-tokens")
+                    yield Input(
+                        value=str(s("max_tokens", 512)),
+                        id="serve-max-tokens",
+                    )
                 with Horizontal(classes="form-row", id="gen-temperature"):
                     yield Label("Temperature:")
-                    yield Input(value="0.7", id="serve-temperature")
+                    yield Input(
+                        value=str(s("temperature", 0.7)),
+                        id="serve-temperature",
+                    )
                 with Horizontal(classes="form-row", id="gen-top-p"):
                     yield Label("Top P:")
-                    yield Input(value="1.0", id="serve-top-p")
+                    yield Input(
+                        value=str(s("top_p", 1.0)), id="serve-top-p"
+                    )
                 with Horizontal(classes="form-row", id="gen-top-k"):
                     yield Label("Top K:")
-                    yield Input(value="0", id="serve-top-k")
+                    yield Input(
+                        value=str(s("top_k", 0)), id="serve-top-k"
+                    )
                 with Horizontal(classes="form-row", id="gen-min-p"):
                     yield Label("Min P:")
-                    yield Input(value="0.0", id="serve-min-p")
+                    yield Input(
+                        value=str(s("min_p", 0.0)), id="serve-min-p"
+                    )
                 with Horizontal(classes="form-row", id="gen-repeat"):
                     yield Label("Repeat penalty:")
-                    yield Input(value="1.0", id="serve-repeat-penalty")
+                    yield Input(
+                        value=str(s("repeat_penalty", 1.0)),
+                        id="serve-repeat-penalty",
+                    )
                 with Horizontal(classes="form-row", id="gen-stop"):
                     yield Label("Stop seqs:")
+                    saved_stop = s("stop", [])
                     yield Input(
+                        value=", ".join(saved_stop) if saved_stop else "",
                         placeholder="comma-separated, e.g. </s>,<|eot_id|>",
                         id="serve-stop",
                     )
@@ -267,6 +304,7 @@ class ServeModal(ModalScreen[ServeSettings | None]):
                 with Horizontal(classes="form-row", id="stt-language-row"):
                     yield Label("Language:")
                     yield Input(
+                        value=s("stt_language", "") or "",
                         placeholder="auto-detect (or: en, es, fr, de, it, ja, zh...)",
                         id="serve-stt-language",
                     )
@@ -274,7 +312,7 @@ class ServeModal(ModalScreen[ServeSettings | None]):
                     yield Label("Response fmt:")
                     yield Select(
                         _STT_RESPONSE_FORMATS,
-                        value="json",
+                        value=s("stt_response_format", "json"),
                         id="serve-stt-format",
                     )
 
@@ -286,17 +324,22 @@ class ServeModal(ModalScreen[ServeSettings | None]):
                 )
                 with Horizontal(classes="form-row", id="tts-voice-row"):
                     yield Label("Voice:")
-                    yield Input(value="default", id="serve-tts-voice")
+                    yield Input(
+                        value=str(s("tts_voice", "default")),
+                        id="serve-tts-voice",
+                    )
                 with Horizontal(classes="form-row", id="tts-format-row"):
                     yield Label("Audio format:")
                     yield Select(
                         _AUDIO_FORMATS,
-                        value="wav",
+                        value=s("tts_response_format", "wav"),
                         id="serve-tts-format",
                     )
                 with Horizontal(classes="form-row", id="tts-speed-row"):
                     yield Label("Speed:")
-                    yield Input(value="1.0", id="serve-tts-speed")
+                    yield Input(
+                        value=str(s("tts_speed", 1.0)), id="serve-tts-speed"
+                    )
 
                 # ── Options ──
                 yield Static("[b dim]Options[/]", classes="serve-section")
@@ -305,14 +348,14 @@ class ServeModal(ModalScreen[ServeSettings | None]):
                     yield Checkbox(
                         "Warmup on start (send a test request)",
                         id="serve-warmup",
-                        value=False,
+                        value=s("warmup", False),
                     )
                 with Horizontal(classes="form-row", id="stream-default-row"):
                     yield Label("")
                     yield Checkbox(
                         "Stream by default",
                         id="serve-stream-default",
-                        value=False,
+                        value=s("stream_by_default", False),
                     )
 
             yield Static(
