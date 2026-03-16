@@ -110,21 +110,10 @@ def create_agent_app(
                     retry_config=RetryConfig(max_retries=1, base_delay=0.5, max_delay=2.0),
                 )
 
-            # Determine head's externally reachable URL
-            import socket
-
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                local_ip = s.getsockname()[0]
-                s.close()
-            except Exception:
-                local_ip = "127.0.0.1"
-            head_url = f"http://{local_ip}:{port}"
-
             health_checker = HealthChecker(
                 cluster, client_factory, config,
-                exclude_name=node_name, head_url=head_url,
+                exclude_name=node_name,
+                head_url=f"http://0.0.0.0:{port}",
             )
             await health_checker.start()
             app.state.health_checker = health_checker

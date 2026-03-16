@@ -352,14 +352,15 @@ class HealthChecker:
                         __version__,
                     )
             self._cluster.record_health_success(name, version=worker_version)
-            # Announce head URL to the worker
+            # Announce head URL to the worker using the IP that routes to it
             if self._head_url and name != self._exclude_name:
                 try:
+                    head_url = self._head_url_for(host, port)
                     await loop.run_in_executor(
                         None,
                         client._post,  # type: ignore[union-attr]
                         "/announce-head",
-                        {"url": self._head_url},
+                        {"url": head_url},
                     )
                 except Exception:
                     pass  # Non-critical
@@ -370,6 +371,26 @@ class HealthChecker:
                 self._cluster.record_health_failure(name)
             except KeyError:
                 pass  # Worker was unregistered
+
+    def _head_url_for(self, worker_host: str, worker_port: int) -> str:
+        """Get the head URL using the IP that routes to a specific worker.
+
+        This handles VPNs (e.g., Netbird/WireGuard) where the head has
+        different IPs on different interfaces.
+        """
+        import socket
+        import urllib.parse
+
+        parsed = urllib.parse.urlparse(self._head_url)
+        head_port = parsed.port or 9900
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect((worker_host, worker_port))
+            local_ip = s.getsockname()[0]
+            s.close()
+            return f"http://{local_ip}:{head_port}"
+        except Exception:
+            return self._head_url  # type: ignore[return-value]
 
 
 # ── Auto-discovery ───────────────────────────────
