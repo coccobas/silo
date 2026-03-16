@@ -69,16 +69,21 @@ class ClusterScreen(Screen):
 
         head_url = self._get_head_url()
         if head_url is None:
-            self.app.call_from_thread(self._apply_no_head)
+            self.app.call_from_thread(
+                self._apply_no_head, "Searching for head node..."
+            )
             return
 
         try:
             url = f"{head_url}/cluster/status"
             req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read())
-        except Exception:
-            self.app.call_from_thread(self._apply_no_head)
+        except Exception as exc:
+            self.app.call_from_thread(
+                self._apply_no_head,
+                f"Cannot reach head at {head_url}: {type(exc).__name__}",
+            )
             return
 
         from silo import __version__
@@ -210,7 +215,7 @@ class ClusterScreen(Screen):
                 "[dim]No models running[/]",
             )
 
-    def _apply_no_head(self) -> None:
+    def _apply_no_head(self, message: str = "Start a node with --head") -> None:
         """Show empty state when no head node is reachable."""
         counts = self.query_one(StatusCounts)
         counts.running = 0
@@ -221,8 +226,8 @@ class ClusterScreen(Screen):
         workers_t = self.query_one("#workers-table", DataTable)
         workers_t.clear()
         workers_t.add_row(
-            "[red]No head node[/]", "—", "—", "—", "—", "—",
-            "[dim]Start a node with --head[/]",
+            "[yellow]No head node[/]", "—", "—", "—", "—", "—",
+            f"[dim]{message}[/]",
         )
 
         models_t = self.query_one("#cluster-models-table", DataTable)
