@@ -8,6 +8,7 @@ REGISTRY_PATH = CONFIG_DIR / "registry.json"
 LOGS_DIR = CONFIG_DIR / "logs"
 PIDS_DIR = CONFIG_DIR / "pids"
 WAKE_MODELS_DIR = CONFIG_DIR / "wake-models"
+CLUSTER_WORKERS_PATH = CONFIG_DIR / "cluster_workers.json"
 
 
 def ensure_dirs() -> None:

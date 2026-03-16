@@ -69,10 +69,17 @@ def create_agent_app(
             from silo.agent.retry import RetryConfig
             from silo.config.models import NodeConfig
 
+            from silo.config.paths import CLUSTER_WORKERS_PATH
+
             config = HealthConfig()
-            cluster = ClusterState(config)
+            cluster = ClusterState(
+                config, persist_path=str(CLUSTER_WORKERS_PATH)
+            )
             app.state.cluster = cluster
             app.state.head_name = node_name
+
+            # Load previously registered workers
+            cluster.load_persisted()
 
             # Register self as a worker
             cluster.register_worker(node_name, "127.0.0.1", port)
@@ -93,7 +100,9 @@ def create_agent_app(
                     retry_config=RetryConfig(max_retries=1, base_delay=0.5, max_delay=2.0),
                 )
 
-            health_checker = HealthChecker(cluster, client_factory, config)
+            health_checker = HealthChecker(
+                cluster, client_factory, config, exclude_name=node_name
+            )
             await health_checker.start()
             app.state.health_checker = health_checker
             logger.info("Head node '%s' started with cluster coordination", node_name)

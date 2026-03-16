@@ -24,12 +24,73 @@ class ClusterState:
     Internal state is mutable, but all public accessors return frozen
     WorkerNode snapshots. Thread-safe via asyncio.Lock for use with
     the health checker background task.
+
+    When *persist_path* is set, the worker list is saved to disk on
+    every register/unregister so workers survive head restarts.
     """
 
-    def __init__(self, config: HealthConfig) -> None:
+    def __init__(
+        self, config: HealthConfig, persist_path: str | None = None
+    ) -> None:
         self._config = config
         self._workers: dict[str, WorkerNode] = {}
         self._lock = asyncio.Lock()
+        self._persist_path = persist_path
+
+    def load_persisted(self) -> int:
+        """Load previously registered workers from disk.
+
+        Returns the number of workers loaded. Workers start with
+        status 'unknown' — the health checker will probe them.
+        """
+        if self._persist_path is None:
+            return 0
+
+        import json
+        from pathlib import Path
+
+        path = Path(self._persist_path)
+        if not path.exists():
+            return 0
+
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            logger.warning("Could not read persisted workers from %s", path)
+            return 0
+
+        count = 0
+        for entry in data:
+            name = entry.get("name")
+            host = entry.get("host")
+            port = entry.get("port", 9900)
+            if name and host and name not in self._workers:
+                self._workers[name] = WorkerNode(
+                    name=name, host=host, port=port, status="unknown"
+                )
+                count += 1
+        if count:
+            logger.info("Loaded %d persisted worker(s) from %s", count, path)
+        return count
+
+    def _persist(self) -> None:
+        """Save current workers to disk."""
+        if self._persist_path is None:
+            return
+
+        import json
+        from pathlib import Path
+
+        entries = [
+            {"name": w.name, "host": w.host, "port": w.port}
+            for w in self._workers.values()
+        ]
+        try:
+            Path(self._persist_path).write_text(
+                json.dumps(entries, indent=2)
+            )
+        except Exception:
+            logger.warning("Could not persist workers to %s", self._persist_path)
 
     def register_worker(self, name: str, host: str, port: int) -> WorkerNode:
         """Register or update a worker node. Returns frozen snapshot."""
@@ -45,6 +106,7 @@ class ClusterState:
             ),
         )
         self._workers[name] = worker
+        self._persist()
         logger.info("Registered worker '%s' at %s:%d", name, host, port)
         return worker
 
@@ -52,6 +114,7 @@ class ClusterState:
         """Remove a worker. Returns True if it existed."""
         if name in self._workers:
             del self._workers[name]
+            self._persist()
             logger.info("Unregistered worker '%s'", name)
             return True
         return False
@@ -180,22 +243,31 @@ async def select_node(
 
 
 class HealthChecker:
-    """Background task that periodically health-checks all workers."""
+    """Background task that periodically health-checks all workers.
+
+    Also runs periodic mDNS discovery to auto-register new workers.
+    """
+
+    DISCOVERY_INTERVAL = 30.0  # seconds between mDNS scans
 
     def __init__(
         self,
         cluster: ClusterState,
         client_factory: Callable[[str, str, int], object],
         config: HealthConfig,
+        exclude_name: str | None = None,
     ) -> None:
         self._cluster = cluster
         self._client_factory = client_factory
         self._config = config
+        self._exclude_name = exclude_name
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
+        self._discovery_task: asyncio.Task | None = None  # type: ignore[type-arg]
 
     async def start(self) -> None:
-        """Launch the background health check loop."""
+        """Launch the background health check and discovery loops."""
         self._task = asyncio.create_task(self._check_loop())
+        self._discovery_task = asyncio.create_task(self._discovery_loop())
         logger.info(
             "Health checker started (interval=%.1fs, threshold=%d)",
             self._config.check_interval,
@@ -203,14 +275,15 @@ class HealthChecker:
         )
 
     async def stop(self) -> None:
-        """Cancel the background task."""
-        if self._task is not None:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            logger.info("Health checker stopped")
+        """Cancel the background tasks."""
+        for task in (self._task, self._discovery_task):
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        logger.info("Health checker stopped")
 
     async def _check_loop(self) -> None:
         """Infinite loop: check each worker, sleep, repeat."""
@@ -222,6 +295,25 @@ class HealthChecker:
             except Exception:
                 logger.exception("Unexpected error in health check loop")
             await asyncio.sleep(self._config.check_interval)
+
+    async def _discovery_loop(self) -> None:
+        """Periodically scan for new workers via mDNS."""
+        while True:
+            await asyncio.sleep(self.DISCOVERY_INTERVAL)
+            try:
+                count = await auto_discover_workers(
+                    self._cluster,
+                    timeout=2.0,
+                    exclude_name=self._exclude_name,
+                )
+                if count:
+                    logger.info("Auto-discovery found %d new worker(s)", count)
+            except ImportError:
+                pass  # zeroconf not installed
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("Auto-discovery error", exc_info=True)
 
     async def _check_all_workers(self) -> None:
         """Check health of every registered worker concurrently."""
