@@ -224,25 +224,32 @@ class HealthChecker:
             await asyncio.sleep(self._config.check_interval)
 
     async def _check_all_workers(self) -> None:
-        """Check health of every registered worker."""
+        """Check health of every registered worker concurrently."""
         workers = self._cluster.get_workers()
+        tasks = []
         for worker in workers:
-            # Re-check the worker still exists (could have been unregistered)
             if self._cluster.get_worker(worker.name) is None:
                 continue
+            tasks.append(self._check_one_worker(worker.name, worker.host, worker.port))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _check_one_worker(self, name: str, host: str, port: int) -> None:
+        """Check a single worker in a thread to avoid blocking the event loop."""
+        loop = asyncio.get_running_loop()
+        try:
+            client = self._client_factory(name, host, port)
+            await loop.run_in_executor(
+                None, client._get, "/health"  # type: ignore[union-attr]
+            )
+            self._cluster.record_health_success(name)
+        except KeyError:
+            pass  # Worker was unregistered during iteration
+        except Exception:
             try:
-                client = self._client_factory(
-                    worker.name, worker.host, worker.port
-                )
-                client._get("/health")  # type: ignore[union-attr]
-                self._cluster.record_health_success(worker.name)
+                self._cluster.record_health_failure(name)
             except KeyError:
-                pass  # Worker was unregistered during iteration
-            except Exception:
-                try:
-                    self._cluster.record_health_failure(worker.name)
-                except KeyError:
-                    pass  # Worker was unregistered
+                pass  # Worker was unregistered
 
 
 # ── Auto-discovery ───────────────────────────────
