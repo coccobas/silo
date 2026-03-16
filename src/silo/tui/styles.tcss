@@ -12,6 +12,14 @@ Screen {
     padding: 0 1;
 }
 
+/* ── Wake status bar ─────────────────────────── */
+#wake-status {
+    height: 1;
+    background: $surface;
+    color: $text;
+    padding: 0 1;
+}
+
 /* ── DataTable defaults ───────────────────────── */
 DataTable {
     height: 1fr;

@@ -19,7 +19,22 @@ def cli_runner():
 @pytest.fixture
 def cli_app():
     # Ensure sub-commands are registered
-    from silo.cli import agent_cmd, convert_cmd, doctor_cmd, down_cmd, flow_cmd, init_cmd, logs_cmd, models_cmd, ps_cmd, run_cmd, serve_cmd, ui_cmd, up_cmd  # noqa: F401
+    from silo.cli import (  # noqa: F401
+        agent_cmd,
+        convert_cmd,
+        doctor_cmd,
+        down_cmd,
+        flow_cmd,
+        init_cmd,
+        logs_cmd,
+        models_cmd,
+        ps_cmd,
+        run_cmd,
+        serve_cmd,
+        ui_cmd,
+        up_cmd,
+        wake_cmd,
+    )
 
     return app
 

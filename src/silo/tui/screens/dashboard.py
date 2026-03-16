@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from textual import work
 from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
-from textual import work
 
 from silo.tui.widgets.nav_bar import NavBar
 from silo.tui.widgets.status_counts import StatusCounts
+from silo.tui.widgets.wake_status import WakeStatusBar
 
 
 class DashboardScreen(Screen):
@@ -21,6 +22,7 @@ class DashboardScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         yield StatusCounts(id="status-counts")
+        yield WakeStatusBar(id="wake-status")
         yield Static(" [b]Nodes[/b]", classes="section-title")
         yield DataTable(id="nodes-table")
         yield Static(" [b]Servers[/b]", classes="section-title")
@@ -45,6 +47,7 @@ class DashboardScreen(Screen):
 
         self.action_refresh()
         self._dl_timer = self.set_interval(2.0, self._refresh_downloads)
+        self._wake_timer = self.set_interval(1.0, self._refresh_wake_status)
 
     def action_refresh(self) -> None:
         self._load_data()
@@ -237,3 +240,16 @@ class DashboardScreen(Screen):
             table.add_row(
                 "[dim]No downloads[/]", "—", "—", "—", "—"
             )
+
+    def _refresh_wake_status(self) -> None:
+        """Update the wake status bar from the app-level wake state."""
+        wake_state = getattr(self.app, "wake_status", None)
+        bar = self.query_one("#wake-status", WakeStatusBar)
+        if wake_state is None:
+            bar.state = "off"
+            return
+        bar.state = str(wake_state.state)
+        bar.wake_word = wake_state.wake_word
+        bar.flow_name = wake_state.flow_name
+        bar.detections = wake_state.detections
+        bar.error = wake_state.error or ""

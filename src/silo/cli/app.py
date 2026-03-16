@@ -49,6 +49,7 @@ def main() -> None:
         serve_cmd,
         ui_cmd,
         up_cmd,
+        wake_cmd,
     )
 
     app()

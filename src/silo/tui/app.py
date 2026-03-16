@@ -57,6 +57,7 @@ def create_tui_app():
 
         def on_mount(self) -> None:
             self.downloads = DownloadTracker()
+            self.wake_status = None  # Set by external wake listener
             self.switch_mode("dashboard")
 
 
