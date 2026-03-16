@@ -82,22 +82,48 @@ def _start_agent_daemon(
         agent_instance, host=agent_host, port=agent_port, log_level="warning"
     ))
     mode = "head" if head else "worker"
+    startup_error: list[BaseException] = []
+
+    def _run_server() -> None:
+        try:
+            server.run()
+        except BaseException as exc:
+            startup_error.append(exc)
+
     thread = threading.Thread(
-        target=server.run, daemon=True, name=f"agent-{mode}"
+        target=_run_server, daemon=True, name=f"agent-{mode}"
     )
     thread.start()
 
     # Wait for the agent to be fully ready (lifespan complete)
     import urllib.request
 
+    ready = False
     for _ in range(100):
+        if startup_error:
+            console.print(
+                f"[red]Agent {mode} failed to start: {startup_error[0]}[/red]"
+            )
+            raise typer.Exit(1)
+        if not thread.is_alive():
+            console.print(
+                f"[red]Agent {mode} exited unexpectedly[/red]"
+            )
+            raise typer.Exit(1)
         try:
             urllib.request.urlopen(
                 f"http://127.0.0.1:{agent_port}/health", timeout=1
             )
+            ready = True
             break
         except Exception:
             time.sleep(0.1)
+
+    if not ready:
+        console.print(
+            f"[red]Agent {mode} did not become ready within 10s[/red]"
+        )
+        raise typer.Exit(1)
 
     console.print(
         f"[dim]Agent {mode} '{node_name}' started on {agent_host}:{agent_port}[/dim]"

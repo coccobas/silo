@@ -56,6 +56,9 @@ def create_agent_app(
                 logger.debug(
                     "zeroconf not installed, skipping mDNS advertisement"
                 )
+            except Exception:
+                logger.warning("mDNS advertisement failed", exc_info=True)
+                advertiser = None
 
         # Head mode: start cluster state and health checker
         if head and node_name:
@@ -92,6 +95,8 @@ def create_agent_app(
                 )
             except ImportError:
                 logger.debug("mDNS discovery unavailable, skipping auto-discover")
+            except Exception:
+                logger.warning("mDNS auto-discovery failed", exc_info=True)
 
             # Start health checker
             def client_factory(name: str, host: str, p: int) -> RemoteClient:
