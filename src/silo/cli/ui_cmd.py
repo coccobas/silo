@@ -18,6 +18,9 @@ def ui(
     worker: bool = typer.Option(
         False, "--worker", help="Also start the agent daemon as a worker node."
     ),
+    head_url: str | None = typer.Option(
+        None, "--head-url", help="Head node URL (e.g. http://10.0.0.1:9900). Auto-discovered if omitted."
+    ),
     agent_host: str = typer.Option(
         "0.0.0.0", "--host", help="Agent daemon bind address (used with --head/--worker)."
     ),
@@ -53,12 +56,15 @@ def ui(
     tui_app = create_tui_app()
     if head:
         tui_app.agent_head_port = agent_port
+    if head_url:
+        tui_app.cluster_head_url = head_url
+        console.print(f"[dim]Using head node at {head_url}[/dim]")
     elif worker:
         # Discover the head node via mDNS so the cluster screen works
-        head_url = _discover_head()
-        if head_url:
-            tui_app.cluster_head_url = head_url
-            console.print(f"[dim]Discovered head node at {head_url}[/dim]")
+        discovered = _discover_head()
+        if discovered:
+            tui_app.cluster_head_url = discovered
+            console.print(f"[dim]Discovered head node at {discovered}[/dim]")
     tui_app.run()
 
 
