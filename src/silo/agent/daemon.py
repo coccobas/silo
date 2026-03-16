@@ -49,7 +49,10 @@ def create_agent_app(
             try:
                 from silo.agent.discovery import ServiceAdvertiser
 
-                advertiser = ServiceAdvertiser(node_name=node_name, port=port)
+                role = "head" if head else "worker"
+                advertiser = ServiceAdvertiser(
+                    node_name=node_name, port=port, role=role
+                )
                 # Zeroconf does blocking I/O — run in thread
                 await loop.run_in_executor(None, advertiser.__enter__)
             except ImportError:

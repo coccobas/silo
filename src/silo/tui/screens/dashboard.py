@@ -213,10 +213,14 @@ class DashboardScreen(Screen):
         import urllib.request
 
         head_port = getattr(self.app, "agent_head_port", None)
-        if head_port is None:
+        if head_port is not None:
+            head_url = f"http://127.0.0.1:{head_port}"
+        else:
+            head_url = getattr(self.app, "cluster_head_url", None)
+        if head_url is None:
             return None
         try:
-            url = f"http://127.0.0.1:{head_port}/cluster/status"
+            url = f"{head_url}/cluster/status"
             req = urllib.request.Request(url)
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return json.loads(resp.read())

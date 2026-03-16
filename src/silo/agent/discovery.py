@@ -64,6 +64,7 @@ class DiscoveredNode:
     host: str
     port: int
     hostname: str
+    role: str = "worker"
 
 
 class ServiceAdvertiser:
@@ -76,10 +77,13 @@ class ServiceAdvertiser:
             run_server()
     """
 
-    def __init__(self, node_name: str, port: int) -> None:
+    def __init__(
+        self, node_name: str, port: int, role: str = "worker"
+    ) -> None:
         _require_zeroconf()
         self._node_name = node_name
         self._port = port
+        self._role = role
         self._zeroconf = None
         self._info = None
 
@@ -92,6 +96,7 @@ class ServiceAdvertiser:
             properties={
                 b"node_name": self._node_name.encode(),
                 b"hostname": hostname.encode(),
+                b"role": self._role.encode(),
             },
             server=f"{hostname}.local.",
         )
@@ -163,6 +168,7 @@ def discover_nodes(timeout: float = 3.0) -> list[DiscoveredNode]:
             props = info.properties or {}
             node_name = props.get(b"node_name", b"unknown").decode()
             hostname = props.get(b"hostname", b"unknown").decode()
+            role = props.get(b"role", b"worker").decode()
             addresses = info.parsed_addresses()
             host = addresses[0] if addresses else "unknown"
 
@@ -172,6 +178,7 @@ def discover_nodes(timeout: float = 3.0) -> list[DiscoveredNode]:
                     host=host,
                     port=info.port,
                     hostname=hostname,
+                    role=role,
                 )
             )
 

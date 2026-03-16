@@ -53,7 +53,27 @@ def ui(
     tui_app = create_tui_app()
     if head:
         tui_app.agent_head_port = agent_port
+    elif worker:
+        # Discover the head node via mDNS so the cluster screen works
+        head_url = _discover_head()
+        if head_url:
+            tui_app.cluster_head_url = head_url
+            console.print(f"[dim]Discovered head node at {head_url}[/dim]")
     tui_app.run()
+
+
+def _discover_head() -> str | None:
+    """Try to find a head node on the network via mDNS."""
+    try:
+        from silo.agent.discovery import discover_nodes
+
+        nodes = discover_nodes(timeout=2.0)
+        for node in nodes:
+            if node.role == "head":
+                return f"http://{node.host}:{node.port}"
+    except Exception:
+        pass
+    return None
 
 
 def _start_agent_daemon(

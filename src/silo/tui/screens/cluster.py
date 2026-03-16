@@ -494,13 +494,16 @@ class ClusterScreen(Screen):
             if head_port is not None:
                 return f"http://127.0.0.1:{head_port}"
 
+            # If the TUI discovered a head via mDNS (worker mode)
+            cluster_head_url = getattr(self.app, "cluster_head_url", None)
+            if cluster_head_url is not None:
+                return cluster_head_url
+
             from silo.config.loader import load_config
 
             config = load_config()
-            # Check for a node marked as head, or use first node, or localhost
             for node in config.nodes:
                 return f"http://{node.host}:{node.port}"
-            # Default: assume head is running locally
-            return "http://127.0.0.1:9900"
+            return None
         except Exception:
             return None
