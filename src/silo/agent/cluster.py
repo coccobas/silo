@@ -259,11 +259,13 @@ class HealthChecker:
         client_factory: Callable[[str, str, int], object],
         config: HealthConfig,
         exclude_name: str | None = None,
+        head_url: str | None = None,
     ) -> None:
         self._cluster = cluster
         self._client_factory = client_factory
         self._config = config
         self._exclude_name = exclude_name
+        self._head_url = head_url
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._discovery_task: asyncio.Task | None = None  # type: ignore[type-arg]
 
@@ -350,6 +352,17 @@ class HealthChecker:
                         __version__,
                     )
             self._cluster.record_health_success(name, version=worker_version)
+            # Announce head URL to the worker
+            if self._head_url and name != self._exclude_name:
+                try:
+                    await loop.run_in_executor(
+                        None,
+                        client._post,  # type: ignore[union-attr]
+                        "/announce-head",
+                        {"url": self._head_url},
+                    )
+                except Exception:
+                    pass  # Non-critical
         except KeyError:
             pass  # Worker was unregistered during iteration
         except Exception:

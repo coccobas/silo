@@ -499,6 +499,12 @@ class ClusterScreen(Screen):
             if cluster_head_url is not None:
                 return cluster_head_url
 
+            # Ask local agent if it knows the head (set by head's announcement)
+            url = self._query_local_head()
+            if url is not None:
+                self.app.cluster_head_url = url
+                return url
+
             # Try config nodes — probe each for /cluster/status
             from silo.config.loader import load_config
 
@@ -509,13 +515,22 @@ class ClusterScreen(Screen):
                     self.app.cluster_head_url = url
                     return url
 
-            # Last resort: try mDNS discovery now
-            url = self._discover_head_now()
-            if url is not None:
-                self.app.cluster_head_url = url
-                return url
-
             return None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _query_local_head() -> str | None:
+        """Ask the local agent if the head has announced itself."""
+        import json
+        import urllib.request
+
+        try:
+            with urllib.request.urlopen(
+                "http://127.0.0.1:9900/head", timeout=1
+            ) as resp:
+                data = json.loads(resp.read())
+                return data.get("head_url")
         except Exception:
             return None
 
@@ -529,20 +544,3 @@ class ClusterScreen(Screen):
             return True
         except Exception:
             return False
-
-    def _discover_head_now(self) -> str | None:
-        """Try mDNS discovery to find a head node."""
-        try:
-            from silo.agent.discovery import discover_nodes
-
-            nodes = discover_nodes(timeout=1.0)
-            for node in nodes:
-                if node.role == "head":
-                    return f"http://{node.host}:{node.port}"
-            for node in nodes:
-                url = f"http://{node.host}:{node.port}"
-                if self._probe_head(url):
-                    return url
-        except Exception:
-            pass
-        return None

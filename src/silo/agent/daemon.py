@@ -7,7 +7,7 @@ import platform
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from silo.agent.schemas import (
     CheckResultResponse,
@@ -110,8 +110,21 @@ def create_agent_app(
                     retry_config=RetryConfig(max_retries=1, base_delay=0.5, max_delay=2.0),
                 )
 
+            # Determine head's externally reachable URL
+            import socket
+
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+            except Exception:
+                local_ip = "127.0.0.1"
+            head_url = f"http://{local_ip}:{port}"
+
             health_checker = HealthChecker(
-                cluster, client_factory, config, exclude_name=node_name
+                cluster, client_factory, config,
+                exclude_name=node_name, head_url=head_url,
             )
             await health_checker.start()
             app.state.health_checker = health_checker
@@ -294,5 +307,24 @@ def create_agent_app(
         from silo import __version__
 
         return {"status": "ok", "hostname": platform.node(), "version": __version__}
+
+    # ── Head announcement ─────────────────────────────
+
+    app.state.head_url = None
+
+    @app.post("/announce-head")
+    async def announce_head(request: Request) -> dict[str, str]:
+        """Called by the head to tell this worker where the head is."""
+        body = await request.json()
+        url = body.get("url")
+        if url:
+            app.state.head_url = url
+            logger.info("Head node announced at %s", url)
+        return {"status": "ok"}
+
+    @app.get("/head")
+    def get_head() -> dict[str, str | None]:
+        """Return the head node URL if known."""
+        return {"head_url": app.state.head_url}
 
     return app
