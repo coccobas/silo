@@ -65,7 +65,6 @@ def _start_agent_daemon(
 ) -> None:
     """Start the agent daemon in a background thread."""
     import platform as plat
-    import socket
     import threading
     import time
 
@@ -88,15 +87,16 @@ def _start_agent_daemon(
     )
     thread.start()
 
-    # Wait for the agent to be ready before launching TUI
-    for _ in range(50):
+    # Wait for the agent to be fully ready (lifespan complete)
+    import urllib.request
+
+    for _ in range(100):
         try:
-            s = socket.create_connection(
-                ("127.0.0.1", agent_port), timeout=0.5
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{agent_port}/health", timeout=1
             )
-            s.close()
             break
-        except (ConnectionRefusedError, OSError):
+        except Exception:
             time.sleep(0.1)
 
     console.print(
