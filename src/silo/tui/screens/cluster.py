@@ -487,7 +487,7 @@ class ClusterScreen(Screen):
     # ── Helpers ───────────────────────────────────────
 
     def _get_head_url(self) -> str | None:
-        """Find the head node URL from config or app state."""
+        """Find the head node URL from config, app state, or mDNS discovery."""
         try:
             # If the TUI was launched with --head, use that port
             head_port = getattr(self.app, "agent_head_port", None)
@@ -499,11 +499,44 @@ class ClusterScreen(Screen):
             if cluster_head_url is not None:
                 return cluster_head_url
 
+            # Try config nodes
             from silo.config.loader import load_config
 
             config = load_config()
             for node in config.nodes:
                 return f"http://{node.host}:{node.port}"
+
+            # Last resort: try mDNS discovery now
+            url = self._discover_head_now()
+            if url is not None:
+                self.app.cluster_head_url = url
+                return url
+
             return None
         except Exception:
             return None
+
+    def _discover_head_now(self) -> str | None:
+        """Try mDNS discovery to find a head node."""
+        try:
+            from silo.agent.discovery import discover_nodes
+
+            nodes = discover_nodes(timeout=1.0)
+            for node in nodes:
+                if node.role == "head":
+                    return f"http://{node.host}:{node.port}"
+            # Fallback: try any discovered node's /cluster/status
+            import urllib.request
+
+            for node in nodes:
+                try:
+                    url = f"http://{node.host}:{node.port}"
+                    urllib.request.urlopen(
+                        f"{url}/cluster/status", timeout=2
+                    )
+                    return url
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return None
