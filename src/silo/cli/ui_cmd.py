@@ -73,6 +73,24 @@ def _start_agent_daemon(
     from silo.agent.daemon import create_agent_app
     from silo.config.paths import ensure_dirs
 
+    import socket
+    import urllib.error
+    import urllib.request
+
+    mode = "head" if head else "worker"
+
+    # Check if port is already in use
+    try:
+        s = socket.create_connection(("127.0.0.1", agent_port), timeout=0.5)
+        s.close()
+        console.print(
+            f"[red]Port {agent_port} is already in use. "
+            f"Kill the existing process or use --agent-port.[/red]"
+        )
+        raise typer.Exit(1)
+    except (ConnectionRefusedError, OSError):
+        pass  # Port is free — good
+
     node_name = name or plat.node()
     ensure_dirs()
     agent_instance = create_agent_app(
@@ -81,7 +99,6 @@ def _start_agent_daemon(
     server = uvicorn.Server(uvicorn.Config(
         agent_instance, host=agent_host, port=agent_port, log_level="warning"
     ))
-    mode = "head" if head else "worker"
     startup_error: list[BaseException] = []
 
     def _run_server() -> None:
@@ -96,8 +113,8 @@ def _start_agent_daemon(
     thread.start()
 
     # Wait for the agent to be fully ready (lifespan complete)
-    import urllib.request
-
+    # For head mode, verify /cluster/status is reachable
+    check_path = "/cluster/status" if head else "/health"
     ready = False
     for _ in range(100):
         if startup_error:
@@ -112,7 +129,7 @@ def _start_agent_daemon(
             raise typer.Exit(1)
         try:
             urllib.request.urlopen(
-                f"http://127.0.0.1:{agent_port}/health", timeout=1
+                f"http://127.0.0.1:{agent_port}{check_path}", timeout=1
             )
             ready = True
             break
