@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
@@ -18,7 +19,6 @@ from textual.widgets import (
     TabbedContent,
     TabPane,
 )
-from textual import work
 
 from silo.tui.widgets.confirm_modal import ConfirmModal
 from silo.tui.widgets.download_modal import DownloadModal
@@ -61,6 +61,9 @@ class ModelsScreen(Screen):
         with TabbedContent(id="models-tabs"):
             with TabPane("Local", id="tab-local"):
                 yield DataTable(id="local-table")
+                with Horizontal(classes="form-row"):
+                    yield Button("Serve", id="serve-btn", variant="success")
+                    yield Button("Delete", id="delete-btn", variant="error")
                 yield Static(id="local-detail", classes="detail-panel")
             with TabPane("Search", id="tab-search"):
                 with Horizontal(classes="form-row"):
@@ -270,7 +273,7 @@ class ModelsScreen(Screen):
                 try:
                     lines = log_file.read_text().strip().splitlines()
                     # Show last few meaningful lines
-                    tail = [l for l in lines[-5:] if l.strip()]
+                    tail = [line for line in lines[-5:] if line.strip()]
                     if tail:
                         error_msg = tail[-1]
                 except Exception:
@@ -295,9 +298,9 @@ class ModelsScreen(Screen):
 
     def _warmup(self, settings: ServeSettings) -> None:
         """Send a warmup request to pre-load the model into memory."""
+        import json
         import time
         import urllib.request
-        import json
 
         url = f"http://{settings.host}:{settings.port}/v1/chat/completions"
         body = json.dumps({
@@ -361,7 +364,11 @@ class ModelsScreen(Screen):
     # ── Search tab ───────────────────────────────────────
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "search-btn":
+        if event.button.id == "serve-btn":
+            self.action_serve_selected()
+        elif event.button.id == "delete-btn":
+            self.action_delete_selected()
+        elif event.button.id == "search-btn":
             self._search_page = 0
             self._start_search()
         elif event.button.id == "download-btn":

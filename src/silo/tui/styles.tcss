@@ -191,6 +191,17 @@ DownloadModal > #dialog > #buttons > Button {
     margin: 0 1;
 }
 
+/* ── Local tab action buttons ────────────────── */
+#tab-local .form-row {
+    height: 3;
+    align-horizontal: left;
+}
+
+#tab-local .form-row > Button {
+    margin: 0 1;
+    min-width: 12;
+}
+
 /* ── Search pagination bar ────────────────────── */
 .page-bar {
     height: 3;
