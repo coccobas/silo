@@ -13,6 +13,8 @@ from fastapi import APIRouter, HTTPException, Request
 from silo.agent.client import LocalClient, RemoteClient
 from silo.agent.cluster import ClusterState, select_node
 from silo.agent.cluster_schemas import (
+    ClusterDownloadRequest,
+    ClusterDownloadResponse,
     ClusterSpawnRequest,
     ClusterSpawnResponse,
     ClusterStatusResponse,
@@ -106,7 +108,13 @@ def cluster_status(request: Request) -> ClusterStatusResponse:
             total_memory += mem.total_gb
             total_available += mem.available_gb
         except Exception:
-            logger.debug("Could not query worker '%s'", worker.name)
+            logger.warning(
+                "Could not query worker '%s' at %s:%d",
+                worker.name,
+                worker.host,
+                worker.port,
+                exc_info=True,
+            )
 
         worker_responses.append(
             WorkerNodeResponse(
@@ -205,4 +213,40 @@ def cluster_stop(req: ClusterStopRequest, request: Request) -> ClusterStopRespon
     raise HTTPException(
         status_code=404,
         detail=f"Model '{req.name}' not found on any cluster node",
+    )
+
+
+# ── Download ────────────────────────────────────
+
+
+@router.post("/download", response_model=ClusterDownloadResponse)
+def cluster_download(
+    req: ClusterDownloadRequest, request: Request
+) -> ClusterDownloadResponse:
+    """Download a model on a specific worker node."""
+    cluster = _get_cluster(request)
+    head_name = _get_head_name(request)
+
+    worker = cluster.get_worker(req.node)
+    if worker is None:
+        raise HTTPException(
+            status_code=404, detail=f"Node '{req.node}' not found in cluster"
+        )
+
+    if worker.name == head_name:
+        client: LocalClient | RemoteClient = LocalClient()
+    else:
+        client = _build_client(worker.name, worker.host, worker.port)
+
+    try:
+        local_path = client.download(req.repo_id, local_dir=req.local_dir)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Download failed on '{req.node}': {exc}",
+        ) from exc
+
+    logger.info("Downloaded '%s' on node '%s'", req.repo_id, req.node)
+    return ClusterDownloadResponse(
+        node=req.node, repo_id=req.repo_id, local_path=local_path
     )

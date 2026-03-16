@@ -66,6 +66,14 @@ class ClusterStopRequest(BaseModel):
     grace_period: int = 30
 
 
+class ClusterDownloadRequest(BaseModel):
+    """Request to download a model on a specific worker node."""
+
+    repo_id: str
+    node: str
+    local_dir: str | None = None
+
+
 # ── Response models ──────────────────────────────
 
 
@@ -104,3 +112,11 @@ class ClusterStopResponse(BaseModel):
     node: str
     stopped: bool
     name: str
+
+
+class ClusterDownloadResponse(BaseModel):
+    """Response after cluster-level download."""
+
+    node: str
+    repo_id: str
+    local_path: str

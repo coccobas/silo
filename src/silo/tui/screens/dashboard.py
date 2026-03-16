@@ -66,8 +66,10 @@ class DashboardScreen(Screen):
         server_rows: list[tuple[str, str, str, str]] = []
         total_running = 0
         total_registered = 0
+        seen_nodes: set[str] = set()
 
         for node_name, client in clients.items():
+            seen_nodes.add(node_name)
             try:
                 mem = client.memory()
                 registry = client.registry()
@@ -136,6 +138,55 @@ class DashboardScreen(Screen):
                             str(model_cfg.port), "unreachable",
                         ))
 
+        # ── Merge cluster workers not already in config ──
+        cluster_data = self._fetch_cluster_status()
+        if cluster_data is not None:
+            for w in cluster_data.get("workers", []):
+                if w["name"] in seen_nodes:
+                    continue
+                seen_nodes.add(w["name"])
+                status = w.get("status", "unknown")
+                mem = w.get("memory")
+                processes = w.get("processes", [])
+                running_on_node = sum(
+                    1 for p in processes if p.get("status") == "running"
+                )
+                total_running += running_on_node
+
+                if mem:
+                    mem_str = f"{mem['usage_percent']:.0f}% of {mem['total_gb']:.0f} GB"
+                    pressure_color = {
+                        "normal": "green",
+                        "warn": "yellow",
+                        "critical": "red",
+                    }.get(mem.get("pressure", ""), "dim")
+                    mem_display = f"[{pressure_color}]{mem_str}[/]"
+                else:
+                    mem_display = "[dim]—[/]"
+
+                status_color = {
+                    "healthy": "green",
+                    "unhealthy": "red",
+                    "unknown": "yellow",
+                }.get(status, "dim")
+
+                node_rows.append((
+                    w["name"],
+                    f"[{status_color}]{status}[/]",
+                    mem_display,
+                    "—",
+                    str(running_on_node),
+                ))
+
+                for proc in processes:
+                    proc_status = proc.get("status", "unknown")
+                    server_rows.append((
+                        w["name"],
+                        proc["name"],
+                        str(proc.get("port", "—")),
+                        proc_status,
+                    ))
+
         # Local memory for status bar
         try:
             local_mem = clients["local"].memory()
@@ -154,6 +205,23 @@ class DashboardScreen(Screen):
             mem_pct,
             mem_pressure,
         )
+
+    def _fetch_cluster_status(self) -> dict | None:
+        """Fetch cluster status from the head node, if available."""
+        import json
+        import urllib.error
+        import urllib.request
+
+        head_port = getattr(self.app, "agent_head_port", None)
+        if head_port is None:
+            return None
+        try:
+            url = f"http://127.0.0.1:{head_port}/cluster/status"
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return json.loads(resp.read())
+        except Exception:
+            return None
 
     def _apply_data(
         self,

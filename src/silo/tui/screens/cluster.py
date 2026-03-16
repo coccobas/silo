@@ -17,7 +17,15 @@ class ClusterScreen(Screen):
     BINDINGS = [
         ("r", "refresh", "Refresh"),
         ("g", "register", "Register"),
+        ("s", "spawn", "Spawn"),
+        ("x", "stop_model", "Stop"),
+        ("d", "download", "Download"),
     ]
+
+    # Cache worker names for modals
+    _worker_names: list[str] = []
+    # Cache model names for stop
+    _model_names: list[str] = []
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -27,7 +35,8 @@ class ClusterScreen(Screen):
         yield Static(" [b]Models (cluster-wide)[/b]", classes="section-title")
         yield DataTable(id="cluster-models-table")
         yield Static(
-            " [dim]r[/] refresh  [dim]g[/] register worker",
+            " [dim]r[/] refresh  [dim]g[/] register  "
+            "[dim]s[/] spawn  [dim]x[/] stop  [dim]d[/] download",
             classes="hint-bar",
         )
         yield NavBar(active_screen="cluster")
@@ -70,11 +79,14 @@ class ClusterScreen(Screen):
 
         worker_rows: list[tuple[str, str, str, str, str, str]] = []
         model_rows: list[tuple[str, str, str, str, str, str]] = []
+        worker_names: list[str] = []
+        model_names: list[str] = []
         total_running = 0
         total_available = 0.0
         total_memory = 0.0
 
         for w in data.get("workers", []):
+            worker_names.append(w["name"])
             status = w.get("status", "unknown")
             mem = w.get("memory")
             processes = w.get("processes", [])
@@ -114,6 +126,7 @@ class ClusterScreen(Screen):
             for proc in processes:
                 proc_status = proc.get("status", "unknown")
                 proc_color = "green" if proc_status == "running" else "dim"
+                model_names.append(proc["name"])
                 model_rows.append((
                     f"[{proc_color}]{w['name']}[/]",
                     f"[{proc_color}]{proc['name']}[/]",
@@ -136,6 +149,8 @@ class ClusterScreen(Screen):
             total_running,
             len(data.get("workers", [])),
             mem_pct,
+            worker_names,
+            model_names,
         )
 
     def _apply_data(
@@ -145,7 +160,12 @@ class ClusterScreen(Screen):
         running_count: int,
         worker_count: int,
         mem_pct: float,
+        worker_names: list[str],
+        model_names: list[str],
     ) -> None:
+        self._worker_names = worker_names
+        self._model_names = model_names
+
         counts = self.query_one(StatusCounts)
         counts.running = running_count
         counts.registered = worker_count
@@ -190,6 +210,8 @@ class ClusterScreen(Screen):
         models_t = self.query_one("#cluster-models-table", DataTable)
         models_t.clear()
 
+    # ── Register ──────────────────────────────────────
+
     def action_register(self) -> None:
         """Show a prompt to register a new worker."""
         from silo.tui.widgets.register_modal import RegisterModal
@@ -223,6 +245,176 @@ class ClusterScreen(Screen):
 
         # Refresh after registration
         self._load_data()
+
+    # ── Spawn ─────────────────────────────────────────
+
+    def action_spawn(self) -> None:
+        """Show a modal to spawn a model on a worker."""
+        if not self._worker_names:
+            self.notify("No workers available", severity="warning")
+            return
+
+        from silo.tui.widgets.cluster_spawn_modal import ClusterSpawnModal
+
+        def on_result(result: dict | None) -> None:
+            if result is not None:
+                self._do_spawn(result)
+
+        self.app.push_screen(
+            ClusterSpawnModal(self._worker_names), on_result
+        )
+
+    @work(thread=True)
+    def _do_spawn(self, data: dict) -> None:
+        import json
+        import urllib.request
+
+        head_url = self._get_head_url()
+        if head_url is None:
+            return
+
+        self.app.call_from_thread(
+            self.notify,
+            f"Spawning {data['name']} on {data['node']}...",
+        )
+
+        try:
+            body = json.dumps(data).encode()
+            req = urllib.request.Request(
+                f"{head_url}/cluster/spawn",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read())
+            self.app.call_from_thread(
+                self.notify,
+                f"Spawned {result['name']} on {result['node']} (PID {result['pid']})",
+            )
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.notify,
+                f"Spawn failed: {exc}",
+                severity="error",
+            )
+
+        self._load_data()
+
+    # ── Stop ──────────────────────────────────────────
+
+    def action_stop_model(self) -> None:
+        """Stop the selected model from the cluster models table."""
+        models_t = self.query_one("#cluster-models-table", DataTable)
+        if models_t.cursor_row is None or models_t.row_count == 0:
+            return
+        if not self._model_names:
+            return
+
+        row_idx = models_t.cursor_row
+        if row_idx >= len(self._model_names):
+            return
+        model_name = self._model_names[row_idx]
+
+        from silo.tui.widgets.confirm_modal import ConfirmModal
+
+        def on_confirm(confirmed: bool) -> None:
+            if confirmed:
+                self._do_stop(model_name)
+
+        self.app.push_screen(
+            ConfirmModal(f"Stop model '{model_name}'?"), on_confirm
+        )
+
+    @work(thread=True)
+    def _do_stop(self, model_name: str) -> None:
+        import json
+        import urllib.request
+
+        head_url = self._get_head_url()
+        if head_url is None:
+            return
+
+        self.app.call_from_thread(
+            self.notify, f"Stopping {model_name}..."
+        )
+
+        try:
+            body = json.dumps({"name": model_name}).encode()
+            req = urllib.request.Request(
+                f"{head_url}/cluster/stop",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read())
+            self.app.call_from_thread(
+                self.notify,
+                f"Stopped {result['name']} on {result['node']}",
+            )
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.notify,
+                f"Stop failed: {exc}",
+                severity="error",
+            )
+
+        self._load_data()
+
+    # ── Download ──────────────────────────────────────
+
+    def action_download(self) -> None:
+        """Show a modal to download a model to a worker."""
+        if not self._worker_names:
+            self.notify("No workers available", severity="warning")
+            return
+
+        from silo.tui.widgets.cluster_download_modal import ClusterDownloadModal
+
+        def on_result(result: dict | None) -> None:
+            if result is not None:
+                self._do_download(result)
+
+        self.app.push_screen(
+            ClusterDownloadModal(self._worker_names), on_result
+        )
+
+    @work(thread=True)
+    def _do_download(self, data: dict) -> None:
+        import json
+        import urllib.request
+
+        head_url = self._get_head_url()
+        if head_url is None:
+            return
+
+        self.app.call_from_thread(
+            self.notify,
+            f"Downloading {data['repo_id']} to {data['node']}...",
+        )
+
+        try:
+            body = json.dumps(data).encode()
+            req = urllib.request.Request(
+                f"{head_url}/cluster/download",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                result = json.loads(resp.read())
+            self.app.call_from_thread(
+                self.notify,
+                f"Downloaded {result['repo_id']} on {result['node']}",
+            )
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.notify,
+                f"Download failed: {exc}",
+                severity="error",
+            )
+
+        self._load_data()
+
+    # ── Helpers ───────────────────────────────────────
 
     def _get_head_url(self) -> str | None:
         """Find the head node URL from config or app state."""
