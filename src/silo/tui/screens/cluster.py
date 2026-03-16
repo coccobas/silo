@@ -499,12 +499,15 @@ class ClusterScreen(Screen):
             if cluster_head_url is not None:
                 return cluster_head_url
 
-            # Try config nodes
+            # Try config nodes — probe each for /cluster/status
             from silo.config.loader import load_config
 
             config = load_config()
             for node in config.nodes:
-                return f"http://{node.host}:{node.port}"
+                url = f"http://{node.host}:{node.port}"
+                if self._probe_head(url):
+                    self.app.cluster_head_url = url
+                    return url
 
             # Last resort: try mDNS discovery now
             url = self._discover_head_now()
@@ -516,6 +519,17 @@ class ClusterScreen(Screen):
         except Exception:
             return None
 
+    @staticmethod
+    def _probe_head(url: str) -> bool:
+        """Check if a URL hosts a cluster head."""
+        import urllib.request
+
+        try:
+            urllib.request.urlopen(f"{url}/cluster/status", timeout=2)
+            return True
+        except Exception:
+            return False
+
     def _discover_head_now(self) -> str | None:
         """Try mDNS discovery to find a head node."""
         try:
@@ -525,18 +539,10 @@ class ClusterScreen(Screen):
             for node in nodes:
                 if node.role == "head":
                     return f"http://{node.host}:{node.port}"
-            # Fallback: try any discovered node's /cluster/status
-            import urllib.request
-
             for node in nodes:
-                try:
-                    url = f"http://{node.host}:{node.port}"
-                    urllib.request.urlopen(
-                        f"{url}/cluster/status", timeout=2
-                    )
+                url = f"http://{node.host}:{node.port}"
+                if self._probe_head(url):
                     return url
-                except Exception:
-                    continue
         except Exception:
             pass
         return None
