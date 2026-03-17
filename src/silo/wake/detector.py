@@ -38,11 +38,19 @@ class WakeWordDetector:
             ) from e
 
         # Download default models if needed.
-        # Disable tqdm progress bars — they create multiprocessing locks
-        # that fail inside thread pool executors (e.g., Textual workers).
+        # Disable tqdm progress bars and multiprocessing lock creation —
+        # tqdm's mp_lock triggers fork_exec for a resource tracker, which
+        # fails with "bad value(s) in fds_to_keep" inside thread pool
+        # executors (e.g., Textual workers).
         import os
 
+        from tqdm.std import TqdmDefaultWriteLock, tqdm
+
         os.environ["TQDM_DISABLE"] = "1"
+        if not hasattr(TqdmDefaultWriteLock, "mp_lock"):
+            TqdmDefaultWriteLock.mp_lock = None
+        if not hasattr(tqdm, "_lock"):
+            tqdm._lock = TqdmDefaultWriteLock()
         try:
             openwakeword.utils.download_models()
         finally:
