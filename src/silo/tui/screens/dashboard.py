@@ -240,14 +240,11 @@ class DashboardScreen(Screen):
     def _fetch_cluster_status(self) -> dict | None:
         """Fetch cluster status from the head node, if available."""
         import json
-        import urllib.error
         import urllib.request
 
-        head_port = getattr(self.app, "agent_head_port", None)
-        if head_port is not None:
-            head_url = f"http://127.0.0.1:{head_port}"
-        else:
-            head_url = getattr(self.app, "cluster_head_url", None)
+        from silo.agent.client import resolve_head_url
+
+        head_url = resolve_head_url(self.app)
         if head_url is None:
             return None
         try:

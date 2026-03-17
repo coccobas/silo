@@ -517,59 +517,6 @@ class ClusterScreen(Screen):
 
     def _get_head_url(self) -> str | None:
         """Find the head node URL from config, app state, or mDNS discovery."""
-        try:
-            # If the TUI was launched with --head, use that port
-            head_port = getattr(self.app, "agent_head_port", None)
-            if head_port is not None:
-                return f"http://127.0.0.1:{head_port}"
+        from silo.agent.client import resolve_head_url
 
-            # If the TUI discovered a head via mDNS (worker mode)
-            cluster_head_url = getattr(self.app, "cluster_head_url", None)
-            if cluster_head_url is not None:
-                return cluster_head_url
-
-            # Ask local agent if it knows the head (set by head's announcement)
-            url = self._query_local_head()
-            if url is not None:
-                self.app.cluster_head_url = url
-                return url
-
-            # Try config nodes — probe each for /cluster/status
-            from silo.config.loader import load_config
-
-            config = load_config()
-            for node in config.nodes:
-                url = f"http://{node.host}:{node.port}"
-                if self._probe_head(url):
-                    self.app.cluster_head_url = url
-                    return url
-
-            return None
-        except Exception:
-            return None
-
-    @staticmethod
-    def _query_local_head() -> str | None:
-        """Ask the local agent if the head has announced itself."""
-        import json
-        import urllib.request
-
-        try:
-            with urllib.request.urlopen(
-                "http://127.0.0.1:9900/head", timeout=1
-            ) as resp:
-                data = json.loads(resp.read())
-                return data.get("head_url")
-        except Exception:
-            return None
-
-    @staticmethod
-    def _probe_head(url: str) -> bool:
-        """Check if a URL hosts a cluster head."""
-        import urllib.request
-
-        try:
-            urllib.request.urlopen(f"{url}/cluster/status", timeout=2)
-            return True
-        except Exception:
-            return False
+        return resolve_head_url(self.app)

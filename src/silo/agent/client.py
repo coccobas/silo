@@ -388,3 +388,90 @@ def build_clients(
                 )
 
     return clients
+
+
+def resolve_head_url(app: Any = None) -> str | None:
+    """Find the cluster head URL using multiple strategies.
+
+    This is the canonical resolution function — used by the cluster screen,
+    dashboard, and flow modal so they all find workers the same way.
+
+    Strategies (tried in order):
+        1. app.agent_head_port — TUI launched with --head
+        2. app.cluster_head_url — explicit --head-url or mDNS discovered
+        3. Local agent /head endpoint — head announced itself
+        4. Probe config nodes for /cluster/status
+
+    The result is cached on app.cluster_head_url when found via
+    strategies 3 or 4, so subsequent calls are fast.
+    """
+    import json
+    import urllib.request
+
+    # 1. App-level head port (launched with --head)
+    if app is not None:
+        head_port = getattr(app, "agent_head_port", None)
+        if head_port is not None:
+            return f"http://127.0.0.1:{head_port}"
+
+        # 2. App-level head URL (--head-url or mDNS discovered)
+        cached = getattr(app, "cluster_head_url", None)
+        if cached is not None:
+            return cached
+
+    # 3. Ask local agent if the head has announced itself
+    try:
+        with urllib.request.urlopen(
+            "http://127.0.0.1:9900/head", timeout=1
+        ) as resp:
+            data = json.loads(resp.read())
+            url = data.get("head_url")
+            if url:
+                if app is not None:
+                    app.cluster_head_url = url
+                return url
+    except Exception:
+        pass
+
+    # 4. Probe config nodes for /cluster/status
+    try:
+        from silo.config.loader import load_config
+
+        config = load_config()
+        for node in config.nodes:
+            probe_url = f"http://{node.host}:{node.port}"
+            try:
+                urllib.request.urlopen(
+                    f"{probe_url}/cluster/status", timeout=2
+                )
+                if app is not None:
+                    app.cluster_head_url = probe_url
+                return probe_url
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return None
+
+
+def fetch_cluster_workers(app: Any = None) -> list[str]:
+    """Fetch worker node names from the cluster head.
+
+    Uses resolve_head_url to find the head, then queries /cluster/status.
+    Returns an empty list if no head is found or the request fails.
+    """
+    import json
+    import urllib.request
+
+    head_url = resolve_head_url(app)
+    if head_url is None:
+        return []
+
+    try:
+        req = urllib.request.Request(f"{head_url}/cluster/status")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+            return [w["name"] for w in data.get("workers", []) if "name" in w]
+    except Exception:
+        return []

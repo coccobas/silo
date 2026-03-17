@@ -56,7 +56,7 @@ def _load_available_models() -> list[tuple[str, str, str]]:
         from silo.config.loader import load_config
 
         config = load_config()
-        clients = build_clients(config.nodes, discover=True)
+        clients = build_clients(config.nodes)
         local_name = local_node_name()
 
         models: list[tuple[str, str, str]] = []
@@ -115,103 +115,39 @@ def _load_available_nodes(app: Any = None) -> list[str]:
 
     Returns a list of unique node names.
     """
+    nodes: list[str] = []
+
+    # 1. Config nodes + local (same as _load_available_models)
     try:
         from silo.agent.client import build_clients
         from silo.config.loader import load_config
 
         config = load_config()
-        clients = build_clients(config.nodes, discover=True)
+        clients = build_clients(config.nodes)
 
-        nodes: list[str] = []
         for name in clients:
             if name not in nodes:
                 nodes.append(name)
+    except Exception:
+        pass
 
-        # Also check cluster workers from head node
-        cluster_nodes = _fetch_cluster_nodes(app)
-        for name in cluster_nodes:
+    # 2. Cluster workers from the head node
+    try:
+        from silo.agent.client import fetch_cluster_workers
+
+        for name in fetch_cluster_workers(app):
             if name not in nodes:
                 nodes.append(name)
-
-        return nodes
     except Exception:
+        pass
+
+    # Fallback: at least include local hostname
+    if not nodes:
         import platform
 
-        return [platform.node().split(".")[0]]
+        nodes.append(platform.node().split(".")[0])
 
-
-def _fetch_cluster_nodes(app: Any = None) -> list[str]:
-    """Fetch node names from the cluster head, if available.
-
-    Uses the same resolution chain as the cluster screen:
-    1. app.agent_head_port (TUI launched with --head)
-    2. app.cluster_head_url (discovered or passed via --head-url)
-    3. Local agent /head endpoint (head announced itself)
-    4. Probe config nodes for /cluster/status
-    """
-    import json
-    import urllib.request
-
-    head_url = _resolve_head_url(app)
-    if head_url is None:
-        return []
-
-    try:
-        url = f"{head_url}/cluster/status"
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read())
-            return [w["name"] for w in data.get("workers", []) if "name" in w]
-    except Exception:
-        return []
-
-
-def _resolve_head_url(app: Any = None) -> str | None:
-    """Find the cluster head URL using multiple strategies."""
-    import json
-    import urllib.request
-
-    # 1. App-level head port (launched with --head)
-    if app is not None:
-        head_port = getattr(app, "agent_head_port", None)
-        if head_port is not None:
-            return f"http://127.0.0.1:{head_port}"
-
-        # 2. App-level head URL (--head-url or mDNS discovered)
-        head_url = getattr(app, "cluster_head_url", None)
-        if head_url is not None:
-            return head_url
-
-    # 3. Ask local agent if the head has announced itself
-    try:
-        with urllib.request.urlopen(
-            "http://127.0.0.1:9900/head", timeout=1
-        ) as resp:
-            data = json.loads(resp.read())
-            url = data.get("head_url")
-            if url:
-                return url
-    except Exception:
-        pass
-
-    # 4. Probe config nodes for /cluster/status
-    try:
-        from silo.config.loader import load_config
-
-        config = load_config()
-        for node in config.nodes:
-            probe_url = f"http://{node.host}:{node.port}"
-            try:
-                urllib.request.urlopen(
-                    f"{probe_url}/cluster/status", timeout=2
-                )
-                return probe_url
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    return None
+    return nodes
 
 
 class FlowCreateModal(ModalScreen[FlowDraft | None]):
