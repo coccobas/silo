@@ -555,7 +555,9 @@ class ModelsScreen(Screen):
             info = None
             total_bytes = 0
 
-        tracker.start(repo_id, node="local", total_bytes=total_bytes)
+        from silo.agent.client import local_node_name
+
+        tracker.start(repo_id, node=local_node_name(), total_bytes=total_bytes)
         self.app.call_from_thread(
             self.notify, f"Downloading {repo_id}..."
         )

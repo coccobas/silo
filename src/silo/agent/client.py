@@ -66,10 +66,22 @@ class NodeRegistryEntry:
     tags: list[str] = field(default_factory=list)
 
 
+def local_node_name() -> str:
+    """Return the short hostname of this machine.
+
+    This is the canonical identity for the local node — used instead of
+    the hardcoded string "local" so that nodes are always identified by
+    their actual machine name, whether local or remote.
+    """
+    import platform
+
+    return platform.node().split(".")[0]
+
+
 class LocalClient:
     """Client that calls local business logic directly."""
 
-    NODE_NAME = "local"
+    NODE_NAME = local_node_name()
 
     def list_processes(self) -> list[NodeProcess]:
         from silo.process.manager import list_running
@@ -354,8 +366,9 @@ def build_clients(
     When *discover* is True, also scans the LAN via mDNS for agent nodes.
     Explicitly configured nodes take priority over discovered ones.
     """
+    local = LocalClient()
     clients: dict[str, LocalClient | RemoteClient] = {
-        "local": LocalClient(),
+        local.NODE_NAME: local,
     }
     configured_names: set[str] = set()
     for node in nodes or []:

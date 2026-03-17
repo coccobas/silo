@@ -208,11 +208,12 @@ class TestDiscoveryImportError:
 
 class TestBuildClientsDiscovery:
     def test_discover_false_default(self):
-        from silo.agent.client import LocalClient, build_clients
+        from silo.agent.client import LocalClient, build_clients, local_node_name
 
         clients = build_clients()
-        assert "local" in clients
-        assert isinstance(clients["local"], LocalClient)
+        local_name = local_node_name()
+        assert local_name in clients
+        assert isinstance(clients[local_name], LocalClient)
         assert len(clients) == 1
 
     @patch("silo.agent.discovery.discover_nodes")

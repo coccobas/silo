@@ -55,11 +55,12 @@ class DashboardScreen(Screen):
 
     @work(thread=True)
     def _load_data(self) -> None:
-        from silo.agent.client import build_clients
+        from silo.agent.client import build_clients, local_node_name
         from silo.config.loader import load_config
 
         config = load_config()
         clients = build_clients(config.nodes)
+        local_name = local_node_name()
 
         # ── Nodes table data ──
         node_rows: list[tuple[str, str, str, str, str, str, str]] = []
@@ -115,7 +116,7 @@ class DashboardScreen(Screen):
                 # Server rows for this node
                 node_models = [
                     m for m in config.models
-                    if (m.node or "local") == node_name
+                    if (m.node or local_name) == node_name
                 ]
                 config_names = {m.name for m in node_models}
 
@@ -148,7 +149,7 @@ class DashboardScreen(Screen):
                     "—",
                 ))
                 for model_cfg in config.models:
-                    if (model_cfg.node or "local") == node_name:
+                    if (model_cfg.node or local_name) == node_name:
                         server_rows.append((
                             node_name, model_cfg.name,
                             str(model_cfg.port), "unreachable",
@@ -157,18 +158,8 @@ class DashboardScreen(Screen):
         # ── Merge cluster workers not already in config ──
         cluster_data = self._fetch_cluster_status()
         if cluster_data is not None:
-            # The head node reports itself in the worker list under its
-            # hostname, but we already show it as "local".  Skip it and
-            # any worker whose host resolves to a node we've already seen.
-            head_name = cluster_data.get("head", "")
             for w in cluster_data.get("workers", []):
                 if w["name"] in seen_nodes:
-                    continue
-                # Skip the head node — already shown as "local"
-                if w["name"] == head_name:
-                    continue
-                # Also skip workers on 127.0.0.1 (another alias for local)
-                if w.get("host", "") in ("127.0.0.1", "localhost"):
                     continue
                 seen_nodes.add(w["name"])
                 status = w.get("status", "unknown")
@@ -229,7 +220,7 @@ class DashboardScreen(Screen):
 
         # Local memory for status bar
         try:
-            local_mem = clients["local"].memory()
+            local_mem = clients[local_name].memory()
             mem_pct = local_mem.usage_percent
             mem_pressure = local_mem.pressure
         except Exception:

@@ -44,7 +44,7 @@ class DownloadEntry:
     """A single tracked download."""
 
     repo_id: str
-    node: str = "local"
+    node: str = ""  # Set by caller; empty = local machine
     status: DownloadStatus = DownloadStatus.PENDING
     started_at: float = field(default_factory=time)
     finished_at: float | None = None
@@ -143,7 +143,7 @@ class DownloadTracker:
     def start(
         self,
         repo_id: str,
-        node: str = "local",
+        node: str = "",
         total_bytes: int = 0,
     ) -> DownloadEntry:
         with self._lock:

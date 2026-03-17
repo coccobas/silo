@@ -201,12 +201,12 @@ class TestAgentDaemon:
 @pytest.mark.usefixtures("_mock_agent_deps")
 class TestLocalClient:
     def test_list_processes(self):
-        from silo.agent.client import LocalClient
+        from silo.agent.client import LocalClient, local_node_name
 
         client = LocalClient()
         procs = client.list_processes()
         assert len(procs) == 1
-        assert procs[0].node == "local"
+        assert procs[0].node == local_node_name()
         assert procs[0].status == "running"
 
     def test_memory(self):
@@ -249,14 +249,15 @@ class TestLocalClient:
 
 class TestBuildClients:
     def test_local_only(self):
-        from silo.agent.client import LocalClient, build_clients
+        from silo.agent.client import LocalClient, build_clients, local_node_name
 
         clients = build_clients()
-        assert "local" in clients
-        assert isinstance(clients["local"], LocalClient)
+        local_name = local_node_name()
+        assert local_name in clients
+        assert isinstance(clients[local_name], LocalClient)
 
     def test_with_remote_nodes(self):
-        from silo.agent.client import RemoteClient, build_clients
+        from silo.agent.client import RemoteClient, build_clients, local_node_name
         from silo.config.models import NodeConfig
 
         nodes = [
@@ -264,7 +265,7 @@ class TestBuildClients:
             NodeConfig(name="studio", host="10.0.0.2", port=8000),
         ]
         clients = build_clients(nodes)
-        assert "local" in clients
+        assert local_node_name() in clients
         assert "mini-1" in clients
         assert "studio" in clients
         assert isinstance(clients["mini-1"], RemoteClient)

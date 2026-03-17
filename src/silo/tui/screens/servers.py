@@ -57,7 +57,10 @@ class ServersScreen(Screen):
 
     @work(thread=True)
     def _load_servers(self) -> None:
+        from silo.agent.client import local_node_name
+
         clients, config = self._build_clients()
+        local_name = local_node_name()
 
         # Row: (node, name, repo, port, pid, status)
         rows: list[tuple[str, str, str, str, str, str]] = []
@@ -68,7 +71,7 @@ class ServersScreen(Screen):
                 # Get processes from this node
                 node_models = [
                     m for m in config.models
-                    if (m.node or "local") == node_name
+                    if (m.node or local_name) == node_name
                 ]
                 config_names = {m.name for m in node_models}
 
@@ -105,7 +108,7 @@ class ServersScreen(Screen):
             except Exception:
                 # Node unreachable — show it as offline
                 for model_cfg in config.models:
-                    if (model_cfg.node or "local") == node_name:
+                    if (model_cfg.node or local_name) == node_name:
                         rows.append((
                             node_name,
                             model_cfg.name,
@@ -117,7 +120,7 @@ class ServersScreen(Screen):
 
         # Get local memory for the status bar
         try:
-            local_client = clients["local"]
+            local_client = clients[local_name]
             mem = local_client.memory()
             mem_pct = mem.usage_percent
             mem_pressure = mem.pressure
@@ -172,8 +175,10 @@ class ServersScreen(Screen):
         row_idx = list(table.rows.keys()).index(event.row_key)
         node = self._strip_markup(str(table.get_cell_at((row_idx, 0))))
         name = self._strip_markup(str(table.get_cell_at((row_idx, 1))))
-        # Only tail logs for local node
-        if node == "local":
+        # Only tail logs for this machine's node
+        from silo.agent.client import local_node_name
+
+        if node == local_node_name():
             log_path = LOGS_DIR / f"{name}.log"
             viewer = self.query_one(LogViewer)
             viewer.log_path = log_path
@@ -253,22 +258,26 @@ class ServersScreen(Screen):
         )
 
     def action_up_all(self) -> None:
+        from silo.agent.client import local_node_name
         from silo.config.loader import load_config
 
         config = load_config()
+        local_name = local_node_name()
         for model_cfg in config.models:
-            node = model_cfg.node or "local"
+            node = model_cfg.node or local_name
             self._do_start(node, model_cfg.name, model_cfg)
 
     def action_down_all(self) -> None:
         def on_confirm(confirmed: bool) -> None:
             if not confirmed:
                 return
+            from silo.agent.client import local_node_name
             from silo.config.loader import load_config
 
             config = load_config()
+            local_name = local_node_name()
             for model_cfg in config.models:
-                node = model_cfg.node or "local"
+                node = model_cfg.node or local_name
                 self._do_stop(node, model_cfg.name)
 
         self.app.push_screen(

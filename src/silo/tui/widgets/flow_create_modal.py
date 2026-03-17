@@ -50,15 +50,16 @@ def _load_available_models() -> list[tuple[str, str, str]]:
     Returns list of (display_label, model_name, node_name) tuples.
     """
     try:
-        from silo.agent.client import build_clients
+        from silo.agent.client import build_clients, local_node_name
         from silo.config.loader import load_config
 
         config = load_config()
         clients = build_clients(config.nodes)
+        local_name = local_node_name()
 
         models: list[tuple[str, str, str]] = []
         for model_cfg in config.models:
-            node_name = model_cfg.node or "local"
+            node_name = model_cfg.node or local_name
             client = clients.get(node_name)
 
             status = "?"
@@ -89,7 +90,7 @@ def _load_available_models() -> list[tuple[str, str, str]]:
                 continue
             config_names = {
                 m.name for m in config.models
-                if (m.node or "local") == node_name
+                if (m.node or local_name) == node_name
             }
             for proc in processes:
                 if proc.name not in config_names and proc.status == "running":

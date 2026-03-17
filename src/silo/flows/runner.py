@@ -46,16 +46,17 @@ def _find_model_endpoint(model_name: str) -> tuple[str, int]:
     Raises:
         ValueError: If the model is not found or not running.
     """
-    from silo.agent.client import build_clients
+    from silo.agent.client import build_clients, local_node_name
     from silo.config.loader import load_config
 
     config = load_config()
     clients = build_clients(config.nodes)
+    local_name = local_node_name()
 
     # Try to match by model name first, then by repo_id
     for model_cfg in config.models:
         if model_cfg.name == model_name or model_cfg.repo == model_name:
-            node_name = model_cfg.node or "local"
+            node_name = model_cfg.node or local_name
             client = clients.get(node_name)
             if client is None:
                 raise ValueError(
@@ -74,7 +75,7 @@ def _find_model_endpoint(model_name: str) -> tuple[str, int]:
                 )
 
             # For remote nodes, use the node's host, not the model's bind address
-            if node_name == "local":
+            if node_name == local_name:
                 host = model_cfg.host
             else:
                 node_cfg = next(
@@ -92,7 +93,7 @@ def _find_model_endpoint(model_name: str) -> tuple[str, int]:
             continue
         for proc in processes:
             if proc.name == model_name and proc.status == "running":
-                if node_name == "local":
+                if node_name == local_name:
                     return "127.0.0.1", proc.port
                 node_cfg = next(
                     (n for n in config.nodes if n.name == node_name), None
