@@ -63,7 +63,10 @@ class LogViewer(RichLog):
                 new_data = fh.read()
                 if new_data:
                     self._offset += len(new_data)
+                    from datetime import datetime
+
+                    ts = datetime.now().strftime("%H:%M:%S")
                     for line in new_data.decode(errors="replace").splitlines():
-                        self.write(line)
+                        self.write(f"[dim]{ts}[/] {line}")
         except OSError:
             pass
