@@ -460,4 +460,19 @@ class DashboardScreen(Screen):
 
     def _apply_wake_status(self, status) -> None:
         """Update app.wake_status from the listener thread (called via call_from_thread)."""
+        prev = self.app.wake_status
         self.app.wake_status = status
+
+        # Flash the status bar on new detection
+        if status.state == "detected" and (
+            prev is None or prev.detections < status.detections
+        ):
+            bar = self.query_one("#wake-status", WakeStatusBar)
+            bar.add_class("wake-detected")
+            self.set_timer(1.5, lambda: bar.remove_class("wake-detected"))
+            self.notify(
+                f"Wake word '{status.wake_word}' detected! (#{status.detections})",
+                title="Wake Detected",
+                severity="warning",
+            )
+            self.app.bell()

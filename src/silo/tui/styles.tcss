@@ -20,6 +20,12 @@ Screen {
     padding: 0 1;
 }
 
+#wake-status.wake-detected {
+    background: $warning;
+    color: $text;
+    text-style: bold;
+}
+
 /* ── DataTable defaults ───────────────────────── */
 DataTable {
     height: 1fr;
