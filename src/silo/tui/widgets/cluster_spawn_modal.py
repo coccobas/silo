@@ -129,10 +129,9 @@ class ClusterSpawnModal(ModalScreen[dict | None]):
         self._selected_repo = repo_id
         repo_input = self.query_one("#spawn-repo", Input)
         repo_input.value = repo_id
-        # Auto-fill name from repo
+        # Always update name from selected model
         name_input = self.query_one("#spawn-name", Input)
-        if not name_input.value.strip():
-            name_input.value = repo_id.split("/")[-1].lower().replace(" ", "-")
+        name_input.value = repo_id.split("/")[-1].lower().replace(" ", "-")
 
     @work(thread=True)
     def _load_local_models(self) -> None:
