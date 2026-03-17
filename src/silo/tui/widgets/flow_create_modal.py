@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -106,13 +107,16 @@ def _load_available_models() -> list[tuple[str, str, str]]:
         return []
 
 
-def _load_available_nodes() -> list[str]:
+def _load_available_nodes(app: Any = None) -> list[str]:
     """Load all known node names from config, discovery, and cluster status.
+
+    Args:
+        app: The Textual App instance (needed to read cluster head URL).
 
     Returns a list of unique node names.
     """
     try:
-        from silo.agent.client import build_clients, local_node_name
+        from silo.agent.client import build_clients
         from silo.config.loader import load_config
 
         config = load_config()
@@ -124,7 +128,7 @@ def _load_available_nodes() -> list[str]:
                 nodes.append(name)
 
         # Also check cluster workers from head node
-        cluster_nodes = _fetch_cluster_nodes()
+        cluster_nodes = _fetch_cluster_nodes(app)
         for name in cluster_nodes:
             if name not in nodes:
                 nodes.append(name)
@@ -136,20 +140,28 @@ def _load_available_nodes() -> list[str]:
         return [platform.node().split(".")[0]]
 
 
-def _fetch_cluster_nodes() -> list[str]:
-    """Fetch node names from the cluster head, if available."""
+def _fetch_cluster_nodes(app: Any = None) -> list[str]:
+    """Fetch node names from the cluster head, if available.
+
+    Reads the head URL from the app instance (set at TUI startup),
+    matching how the dashboard and cluster screens resolve it.
+    """
     import json
-    import urllib.error
     import urllib.request
 
     try:
-        from silo.config.loader import load_config
-
-        config = load_config()
-        head_port = getattr(config, "agent_head_port", None)
-        if head_port is None:
+        if app is None:
             return []
-        url = f"http://127.0.0.1:{head_port}/cluster/status"
+
+        head_port = getattr(app, "agent_head_port", None)
+        if head_port is not None:
+            head_url = f"http://127.0.0.1:{head_port}"
+        else:
+            head_url = getattr(app, "cluster_head_url", None)
+        if head_url is None:
+            return []
+
+        url = f"{head_url}/cluster/status"
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read())
@@ -186,7 +198,7 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
             model_options = [("(no models configured)", "")]
 
         # Build node list from all known nodes (config, discovery, cluster)
-        all_nodes = _load_available_nodes()
+        all_nodes = _load_available_nodes(self.app)
         self._node_options: list[tuple[str, str]] = [
             ("(auto)", ""),
             *((n, n) for n in all_nodes),
