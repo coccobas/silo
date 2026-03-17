@@ -21,6 +21,7 @@ from silo.agent.schemas import (
     SpawnResponse,
     StopRequest,
     StopResponse,
+    SystemStatsResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -197,10 +198,12 @@ def create_agent_app(
     def node_status() -> NodeStatusResponse:
         from silo.process.manager import list_running
         from silo.process.memory import get_memory_info
+        from silo.process.system_stats import get_system_stats
         from silo.registry.store import Registry
 
         processes = list_running()
         mem = get_memory_info()
+        stats = get_system_stats()
         registry = Registry.load()
 
         return NodeStatusResponse(
@@ -221,6 +224,11 @@ def create_agent_app(
                 used_gb=mem.used_gb,
                 pressure=mem.pressure,
                 usage_percent=mem.usage_percent,
+            ),
+            system_stats=SystemStatsResponse(
+                cpu_percent=stats.cpu_percent,
+                gpu_percent=stats.gpu_percent,
+                gpu_name=stats.gpu_name,
             ),
             registry=[
                 RegistryEntryResponse(
@@ -286,6 +294,19 @@ def create_agent_app(
             used_gb=mem.used_gb,
             pressure=mem.pressure,
             usage_percent=mem.usage_percent,
+        )
+
+    # ── System Stats ─────────────────────────────────
+
+    @app.get("/system-stats", response_model=SystemStatsResponse)
+    def system_stats() -> SystemStatsResponse:
+        from silo.process.system_stats import get_system_stats
+
+        stats = get_system_stats()
+        return SystemStatsResponse(
+            cpu_percent=stats.cpu_percent,
+            gpu_percent=stats.gpu_percent,
+            gpu_name=stats.gpu_name,
         )
 
     # ── Registry ──────────────────────────────────────

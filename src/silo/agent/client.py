@@ -37,6 +37,15 @@ class NodeMemory:
 
 
 @dataclass(frozen=True)
+class NodeSystemStats:
+    """CPU and GPU usage from any node."""
+
+    cpu_percent: float
+    gpu_percent: float
+    gpu_name: str
+
+
+@dataclass(frozen=True)
 class NodeCheck:
     """Check result from any node."""
 
@@ -127,6 +136,16 @@ class LocalClient:
             used_gb=mem.used_gb,
             pressure=mem.pressure,
             usage_percent=mem.usage_percent,
+        )
+
+    def system_stats(self) -> NodeSystemStats:
+        from silo.process.system_stats import get_system_stats
+
+        stats = get_system_stats()
+        return NodeSystemStats(
+            cpu_percent=stats.cpu_percent,
+            gpu_percent=stats.gpu_percent,
+            gpu_name=stats.gpu_name,
         )
 
     def registry(self) -> list[NodeRegistryEntry]:
@@ -282,6 +301,14 @@ class RemoteClient:
             used_gb=data["used_gb"],
             pressure=data["pressure"],
             usage_percent=data["usage_percent"],
+        )
+
+    def system_stats(self) -> NodeSystemStats:
+        data = self._get("/system-stats")
+        return NodeSystemStats(
+            cpu_percent=data["cpu_percent"],
+            gpu_percent=data["gpu_percent"],
+            gpu_name=data["gpu_name"],
         )
 
     def registry(self) -> list[NodeRegistryEntry]:

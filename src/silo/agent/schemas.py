@@ -69,12 +69,21 @@ class RegistryEntryResponse(BaseModel):
     tags: list[str] = []
 
 
+class SystemStatsResponse(BaseModel):
+    """CPU and GPU usage information."""
+
+    cpu_percent: float
+    gpu_percent: float
+    gpu_name: str
+
+
 class NodeStatusResponse(BaseModel):
     """Full status of a node."""
 
     hostname: str
     processes: list[ProcessInfoResponse]
     memory: MemoryInfoResponse
+    system_stats: SystemStatsResponse | None = None
     registry: list[RegistryEntryResponse]
 
 

@@ -17,6 +17,7 @@ class DashboardScreen(Screen):
 
     BINDINGS = [
         ("r", "refresh", "Refresh"),
+        ("w", "toggle_wake", "Wake"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -34,7 +35,7 @@ class DashboardScreen(Screen):
 
     def on_mount(self) -> None:
         nodes = self.query_one("#nodes-table", DataTable)
-        nodes.add_columns("NODE", "STATUS", "MEMORY", "MODELS", "RUNNING")
+        nodes.add_columns("NODE", "STATUS", "CPU", "GPU", "MEMORY", "MODELS", "RUNNING")
         nodes.cursor_type = "row"
 
         servers = self.query_one("#servers-table", DataTable)
@@ -61,7 +62,7 @@ class DashboardScreen(Screen):
         clients = build_clients(config.nodes)
 
         # ── Nodes table data ──
-        node_rows: list[tuple[str, str, str, str, str]] = []
+        node_rows: list[tuple[str, str, str, str, str, str, str]] = []
         # ── Servers table data ──
         server_rows: list[tuple[str, str, str, str]] = []
         total_running = 0
@@ -74,6 +75,17 @@ class DashboardScreen(Screen):
                 mem = client.memory()
                 registry = client.registry()
                 processes = client.list_processes()
+                try:
+                    stats = client.system_stats()
+                    cpu_str = f"{stats.cpu_percent:.0f}%"
+                    gpu_str = (
+                        f"{stats.gpu_percent:.0f}%"
+                        if stats.gpu_percent > 0
+                        else "[dim]—[/]"
+                    )
+                except Exception:
+                    cpu_str = "[dim]—[/]"
+                    gpu_str = "[dim]—[/]"
 
                 running_on_node = sum(
                     1 for p in processes if p.status == "running"
@@ -93,6 +105,8 @@ class DashboardScreen(Screen):
                 node_rows.append((
                     node_name,
                     "[green]online[/]",
+                    cpu_str,
+                    gpu_str,
                     f"[{pressure_color}]{mem_str}[/]",
                     str(len(registry)),
                     str(running_on_node),
@@ -130,6 +144,8 @@ class DashboardScreen(Screen):
                     "—",
                     "—",
                     "—",
+                    "—",
+                    "—",
                 ))
                 for model_cfg in config.models:
                     if (model_cfg.node or "local") == node_name:
@@ -164,6 +180,18 @@ class DashboardScreen(Screen):
                 else:
                     mem_display = "[dim]—[/]"
 
+                sys_stats = w.get("system_stats")
+                if sys_stats:
+                    cpu_display = f"{sys_stats['cpu_percent']:.0f}%"
+                    gpu_display = (
+                        f"{sys_stats['gpu_percent']:.0f}%"
+                        if sys_stats["gpu_percent"] > 0
+                        else "[dim]—[/]"
+                    )
+                else:
+                    cpu_display = "[dim]—[/]"
+                    gpu_display = "[dim]—[/]"
+
                 status_color = {
                     "healthy": "green",
                     "unhealthy": "red",
@@ -173,6 +201,8 @@ class DashboardScreen(Screen):
                 node_rows.append((
                     w["name"],
                     f"[{status_color}]{status}[/]",
+                    cpu_display,
+                    gpu_display,
                     mem_display,
                     "—",
                     str(running_on_node),
@@ -245,10 +275,12 @@ class DashboardScreen(Screen):
         # ── Nodes ──
         nodes_t = self.query_one("#nodes-table", DataTable)
         nodes_t.clear()
-        for node, status, mem, models, running in node_rows:
-            nodes_t.add_row(f"[bold]{node}[/]", status, mem, models, running)
+        for node, status, cpu, gpu, mem, models, running in node_rows:
+            nodes_t.add_row(
+                f"[bold]{node}[/]", status, cpu, gpu, mem, models, running,
+            )
         if not node_rows:
-            nodes_t.add_row("[dim]—[/]", "—", "—", "—", "—")
+            nodes_t.add_row("[dim]—[/]", "—", "—", "—", "—", "—", "—")
 
         # ── Servers ──
         servers_t = self.query_one("#servers-table", DataTable)
@@ -325,3 +357,106 @@ class DashboardScreen(Screen):
         bar.flow_name = wake_state.flow_name
         bar.detections = wake_state.detections
         bar.error = wake_state.error or ""
+
+    # ── Wake word toggle ─────────────────────────────────────────────
+
+    def action_toggle_wake(self) -> None:
+        """Start or stop the wake word listener."""
+        listener = getattr(self.app, "_wake_listener", None)
+        if listener is not None:
+            # Already running — stop it
+            listener.stop()
+            self.app._wake_listener = None
+            self.app.wake_status = None
+            self.notify("Wake listener stopped")
+            return
+
+        # Open config modal with available flows
+        self._open_wake_modal()
+
+    def _open_wake_modal(self) -> None:
+        from silo.config.paths import CONFIG_DIR
+        from silo.flows.parser import list_flows
+
+        from silo.tui.widgets.wake_modal import WakeModal
+
+        flows_dir = CONFIG_DIR / "flows"
+        flows = list_flows(flows_dir)
+        flow_names = [f.name for f in flows]
+
+        self.app.push_screen(WakeModal(flow_names), self._on_wake_configured)
+
+    def _on_wake_configured(self, settings) -> None:
+        """Callback when the wake modal is dismissed."""
+        if settings is None:
+            return
+        self._start_wake_listener(settings)
+
+    @work(thread=True)
+    def _start_wake_listener(self, settings) -> None:
+        """Run the wake word listener in a background thread."""
+        from silo.config.paths import CONFIG_DIR
+        from silo.flows.parser import parse_flow
+        from silo.flows.runner import run_flow
+        from silo.wake.listener import ListenerConfig, WakeState, WakeWordListener
+
+        # Resolve flow definition
+        flow_path = CONFIG_DIR / "flows" / f"{settings.flow_name}.yaml"
+        try:
+            flow_def = parse_flow(flow_path)
+        except (ValueError, FileNotFoundError) as e:
+            self.app.call_from_thread(
+                self.notify, f"Flow error: {e}", severity="error"
+            )
+            return
+
+        # Resolve model path for custom .onnx files
+        model_path = None
+        if settings.wake_word.endswith(".onnx") or "/" in settings.wake_word:
+            model_path = settings.wake_word
+
+        def run_the_flow(flow_name: str) -> None:
+            result = run_flow(flow_def)
+            if not result.success:
+                self.app.call_from_thread(
+                    self.notify,
+                    f"Flow failed: {result.error}",
+                    severity="error",
+                )
+
+        def on_status(status) -> None:
+            self.app.call_from_thread(self._apply_wake_status, status)
+
+        listener_config = ListenerConfig(
+            wake_word=settings.wake_word,
+            flow_name=settings.flow_name,
+            threshold=settings.threshold,
+            model_path=model_path,
+            continuous=settings.continuous,
+            device=settings.device,
+        )
+        listener = WakeWordListener(
+            config=listener_config,
+            flow_runner=run_the_flow,
+            on_status=on_status,
+        )
+        self.app._wake_listener = listener
+
+        try:
+            listener.run()
+        except ImportError as e:
+            self.app.call_from_thread(
+                self.notify,
+                f"Wake dependencies missing: {e}",
+                severity="error",
+            )
+        except RuntimeError as e:
+            self.app.call_from_thread(
+                self.notify, f"Wake error: {e}", severity="error"
+            )
+        finally:
+            self.app._wake_listener = None
+
+    def _apply_wake_status(self, status) -> None:
+        """Update app.wake_status from the listener thread (called via call_from_thread)."""
+        self.app.wake_status = status

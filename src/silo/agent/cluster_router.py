@@ -24,7 +24,11 @@ from silo.agent.cluster_schemas import (
     WorkerNodeResponse,
 )
 from silo.agent.retry import RetryConfig
-from silo.agent.schemas import MemoryInfoResponse, ProcessInfoResponse
+from silo.agent.schemas import (
+    MemoryInfoResponse,
+    ProcessInfoResponse,
+    SystemStatsResponse,
+)
 from silo.config.models import NodeConfig
 
 logger = logging.getLogger(__name__)
@@ -99,6 +103,7 @@ def cluster_status(request: Request) -> ClusterStatusResponse:
     for worker in workers:
         processes: list[ProcessInfoResponse] = []
         memory: MemoryInfoResponse | None = None
+        sys_stats: SystemStatsResponse | None = None
 
         # Only query workers that are healthy or are the head itself
         # to avoid blocking on unreachable workers
@@ -127,6 +132,12 @@ def cluster_status(request: Request) -> ClusterStatusResponse:
                 total_models += len(processes)
                 total_memory += mem.total_gb
                 total_available += mem.available_gb
+                stats = client.system_stats()
+                sys_stats = SystemStatsResponse(
+                    cpu_percent=stats.cpu_percent,
+                    gpu_percent=stats.gpu_percent,
+                    gpu_name=stats.gpu_name,
+                )
             except Exception:
                 logger.warning(
                     "Could not query worker '%s' at %s:%d",
@@ -144,6 +155,7 @@ def cluster_status(request: Request) -> ClusterStatusResponse:
                 version=worker.version,
                 processes=processes,
                 memory=memory,
+                system_stats=sys_stats,
             )
         )
 

@@ -7,7 +7,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from silo.agent.schemas import MemoryInfoResponse, ProcessInfoResponse
+from silo.agent.schemas import (
+    MemoryInfoResponse,
+    ProcessInfoResponse,
+    SystemStatsResponse,
+)
 
 
 # ── Cluster state models ─────────────────────────
@@ -88,6 +92,7 @@ class WorkerNodeResponse(BaseModel):
     version: str | None = None
     processes: list[ProcessInfoResponse] = Field(default_factory=list)
     memory: MemoryInfoResponse | None = None
+    system_stats: SystemStatsResponse | None = None
 
 
 class ClusterStatusResponse(BaseModel):

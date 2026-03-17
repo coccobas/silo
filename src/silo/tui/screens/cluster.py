@@ -47,7 +47,8 @@ class ClusterScreen(Screen):
     def on_mount(self) -> None:
         workers = self.query_one("#workers-table", DataTable)
         workers.add_columns(
-            "NAME", "HOST", "PORT", "STATUS", "VERSION", "MEMORY", "MODELS"
+            "NAME", "HOST", "PORT", "STATUS", "VERSION",
+            "CPU", "GPU", "MEMORY", "MODELS",
         )
         workers.cursor_type = "row"
 
@@ -88,7 +89,7 @@ class ClusterScreen(Screen):
 
         from silo import __version__
 
-        worker_rows: list[tuple[str, str, str, str, str, str, str]] = []
+        worker_rows: list[tuple[str, str, str, str, str, str, str, str, str]] = []
         model_rows: list[tuple[str, str, str, str, str, str]] = []
         worker_names: list[str] = []
         model_names: list[str] = []
@@ -134,12 +135,26 @@ class ClusterScreen(Screen):
             else:
                 version_display = f"[green]{version}[/]"
 
+            sys_stats = w.get("system_stats")
+            if sys_stats:
+                cpu_display = f"{sys_stats['cpu_percent']:.0f}%"
+                gpu_display = (
+                    f"{sys_stats['gpu_percent']:.0f}%"
+                    if sys_stats["gpu_percent"] > 0
+                    else "[dim]—[/]"
+                )
+            else:
+                cpu_display = "[dim]—[/]"
+                gpu_display = "[dim]—[/]"
+
             worker_rows.append((
                 w["name"],
                 w.get("host", "—"),
                 str(w.get("port", "—")),
                 f"[{status_color}]{status}[/]",
                 version_display,
+                cpu_display,
+                gpu_display,
                 mem_display,
                 str(running_count),
             ))
@@ -176,7 +191,7 @@ class ClusterScreen(Screen):
 
     def _apply_data(
         self,
-        worker_rows: list[tuple[str, str, str, str, str, str, str]],
+        worker_rows: list[tuple[str, str, str, str, str, str, str, str, str]],
         model_rows: list[tuple[str, str, str, str, str, str]],
         running_count: int,
         worker_count: int,
@@ -195,13 +210,14 @@ class ClusterScreen(Screen):
         workers_t = self.query_one("#workers-table", DataTable)
         prev_w_cursor = workers_t.cursor_row
         workers_t.clear()
-        for name, host, port, status, version, mem, models in worker_rows:
+        for name, host, port, status, version, cpu, gpu, mem, models in worker_rows:
             workers_t.add_row(
-                f"[bold]{name}[/]", host, port, status, version, mem, models
+                f"[bold]{name}[/]", host, port, status, version,
+                cpu, gpu, mem, models,
             )
         if not worker_rows:
             workers_t.add_row(
-                "[dim]—[/]", "—", "—", "—", "—", "—",
+                "[dim]—[/]", "—", "—", "—", "—", "—", "—", "—",
                 "[dim]No workers registered[/]",
             )
         elif prev_w_cursor is not None:
@@ -232,7 +248,7 @@ class ClusterScreen(Screen):
         workers_t = self.query_one("#workers-table", DataTable)
         workers_t.clear()
         workers_t.add_row(
-            "[yellow]No head node[/]", "—", "—", "—", "—", "—",
+            "[yellow]No head node[/]", "—", "—", "—", "—", "—", "—", "—",
             f"[dim]{message}[/]",
         )
 
