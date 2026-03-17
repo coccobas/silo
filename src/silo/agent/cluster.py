@@ -327,6 +327,9 @@ class HealthChecker:
         for worker in workers:
             if self._cluster.get_worker(worker.name) is None:
                 continue
+            # Skip the head node — it's always healthy by definition
+            if worker.name == self._exclude_name:
+                continue
             tasks.append(self._check_one_worker(worker.name, worker.host, worker.port))
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
