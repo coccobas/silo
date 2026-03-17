@@ -345,25 +345,35 @@ class ModelsScreen(Screen):
         if repo_id.startswith("["):
             return  # placeholder row
 
-        def on_confirm(confirmed: bool) -> None:
-            if confirmed:
-                self._delete_model(repo_id)
+        from silo.registry.store import Registry
+        from silo.tui.widgets.delete_modal import DeleteModal
+
+        entry = Registry.load().get(repo_id)
+        local_path = entry.local_path if entry else None
+
+        def on_result(result: str | None) -> None:
+            if result is not None:
+                self._delete_model(repo_id, delete_files=result == "files")
 
         self.app.push_screen(
-            ConfirmModal(f"Delete '{repo_id}' from registry?"),
-            on_confirm,
+            DeleteModal(repo_id, local_path=local_path), on_result
         )
 
     @work(thread=True)
-    def _delete_model(self, repo_id: str) -> None:
+    def _delete_model(
+        self, repo_id: str, delete_files: bool = False
+    ) -> None:
         from silo.registry.store import Registry
 
         registry = Registry.load()
-        updated = registry.remove(repo_id)
+        updated = registry.remove(repo_id, delete_files=delete_files)
         updated.save()
-        self.app.call_from_thread(
-            self.notify, f"Removed {repo_id} from registry"
-        )
+        msg = f"Deleted {repo_id}"
+        if delete_files:
+            msg += " and model files"
+        else:
+            msg += " from registry"
+        self.app.call_from_thread(self.notify, msg)
         self.app.call_from_thread(self._load_local)
 
     # ── Search tab ───────────────────────────────────────

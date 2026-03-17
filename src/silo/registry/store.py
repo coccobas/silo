@@ -31,7 +31,18 @@ class Registry:
         new_entries = {**self._entries, entry.repo_id: entry}
         return Registry(new_entries)
 
-    def remove(self, repo_id: str) -> Registry:
+    def remove(self, repo_id: str, delete_files: bool = False) -> Registry:
+        if delete_files:
+            entry = self._entries.get(repo_id)
+            if entry and entry.local_path:
+                import shutil
+
+                path = Path(entry.local_path)
+                if path.exists():
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink()
         new_entries = {k: v for k, v in self._entries.items() if k != repo_id}
         return Registry(new_entries)
 
