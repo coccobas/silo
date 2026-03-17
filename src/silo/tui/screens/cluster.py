@@ -283,8 +283,10 @@ class ClusterScreen(Screen):
             if result is not None:
                 self._do_spawn(result)
 
+        head_url = self._get_head_url()
         self.app.push_screen(
-            ClusterSpawnModal(self._worker_names), on_result
+            ClusterSpawnModal(self._worker_names, head_url=head_url),
+            on_result,
         )
 
     @work(thread=True)
