@@ -46,20 +46,25 @@ def _needs_model(step_type: str) -> bool:
     return step_type in _MODEL_TYPES
 
 
-def _load_available_models() -> list[tuple[str, str, str]]:
-    """Load configured models with their node and status.
+def _load_available_models(app: Any = None) -> list[tuple[str, str, str]]:
+    """Load configured models and running processes from all reachable nodes.
+
+    Scans config nodes, then cluster workers, to build a complete list.
 
     Returns list of (display_label, model_name, node_name) tuples.
     """
-    try:
-        from silo.agent.client import build_clients, local_node_name
-        from silo.config.loader import load_config
+    from silo.agent.client import build_clients, local_node_name, resolve_head_url
+    from silo.config.loader import load_config
 
+    models: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str]] = set()  # (model_name, node_name)
+
+    try:
         config = load_config()
         clients = build_clients(config.nodes)
         local_name = local_node_name()
 
-        models: list[tuple[str, str, str]] = []
+        # Config models
         for model_cfg in config.models:
             node_name = model_cfg.node or local_name
             client = clients.get(node_name)
@@ -83,28 +88,75 @@ def _load_available_models() -> list[tuple[str, str, str]]:
 
             label = f"{status_icon} {model_cfg.name} [dim]({node_name}:{model_cfg.port})[/]"
             models.append((label, model_cfg.name, node_name))
+            seen.add((model_cfg.name, node_name))
 
-        # Also scan for running processes not in config
+        # Running processes not in config (local + config nodes)
         for node_name, client in clients.items():
             try:
                 processes = client.list_processes()
             except Exception:
                 continue
-            config_names = {
-                m.name for m in config.models
-                if (m.node or local_name) == node_name
-            }
             for proc in processes:
-                if proc.name not in config_names and proc.status == "running":
+                if (proc.name, node_name) not in seen and proc.status == "running":
                     label = (
                         f"[green]●[/] {proc.name} "
                         f"[dim]({node_name}:{proc.port})[/]"
                     )
                     models.append((label, proc.name, node_name))
-
-        return models
+                    seen.add((proc.name, node_name))
     except Exception:
-        return []
+        pass
+
+    # Cluster workers — fetch their processes from /cluster/status
+    try:
+        _add_cluster_worker_models(app, models, seen)
+    except Exception:
+        pass
+
+    return models
+
+
+def _add_cluster_worker_models(
+    app: Any,
+    models: list[tuple[str, str, str]],
+    seen: set[tuple[str, str]],
+) -> None:
+    """Fetch running models from cluster workers via the head node."""
+    import json
+    import urllib.request
+
+    from silo.agent.client import resolve_head_url
+
+    head_url = resolve_head_url(app)
+    if head_url is None:
+        return
+
+    req = urllib.request.Request(f"{head_url}/cluster/status")
+    with urllib.request.urlopen(req, timeout=3) as resp:
+        data = json.loads(resp.read())
+
+    for worker in data.get("workers", []):
+        worker_name = worker.get("name", "")
+        if not worker_name:
+            continue
+        for proc in worker.get("processes", []):
+            proc_name = proc.get("name", "")
+            proc_status = proc.get("status", "unknown")
+            proc_port = proc.get("port", "?")
+            if not proc_name or (proc_name, worker_name) in seen:
+                continue
+
+            status_icon = {
+                "running": "[green]●[/]",
+                "stopped": "[red]●[/]",
+            }.get(proc_status, "[dim]●[/]")
+
+            label = (
+                f"{status_icon} {proc_name} "
+                f"[dim]({worker_name}:{proc_port})[/]"
+            )
+            models.append((label, proc_name, worker_name))
+            seen.add((proc_name, worker_name))
 
 
 def _load_available_nodes(app: Any = None) -> list[str]:
@@ -169,7 +221,7 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
 
     def compose(self) -> ComposeResult:
         # Load available models for the dropdown
-        self._available_models = _load_available_models()
+        self._available_models = _load_available_models(self.app)
 
         model_options: list[tuple[str, str]] = [
             (label, name) for label, name, _node in self._available_models
@@ -281,6 +333,8 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "step-type":
             self._update_model_visibility()
+        elif event.select.id == "step-node-select":
+            self._update_model_options()
 
     def _update_model_visibility(self) -> None:
         step_type = str(self.query_one("#step-type", Select).value)
@@ -288,6 +342,28 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
         self.query_one("#step-model-row").display = show
         self.query_one("#step-node-row").display = show
         self.query_one("#step-model-custom-row").display = show
+
+    def _update_model_options(self) -> None:
+        """Filter the model dropdown based on the selected node."""
+        selected_node = str(self.query_one("#step-node-select", Select).value)
+        model_select = self.query_one("#step-model-select", Select)
+
+        if selected_node:
+            filtered = [
+                (label, name)
+                for label, name, node in self._available_models
+                if node == selected_node
+            ]
+        else:
+            filtered = [
+                (label, name)
+                for label, name, _node in self._available_models
+            ]
+
+        if not filtered:
+            filtered = [("(no models on this node)", "")]
+
+        model_select.set_options(filtered)
 
     def _render_steps_list(self) -> None:
         """Update the steps list display."""
