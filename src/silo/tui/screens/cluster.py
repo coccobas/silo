@@ -193,6 +193,7 @@ class ClusterScreen(Screen):
         counts.memory_pct = mem_pct
 
         workers_t = self.query_one("#workers-table", DataTable)
+        prev_w_cursor = workers_t.cursor_row
         workers_t.clear()
         for name, host, port, status, version, mem, models in worker_rows:
             workers_t.add_row(
@@ -203,8 +204,11 @@ class ClusterScreen(Screen):
                 "[dim]—[/]", "—", "—", "—", "—", "—",
                 "[dim]No workers registered[/]",
             )
+        elif prev_w_cursor is not None:
+            workers_t.move_cursor(row=min(prev_w_cursor, len(worker_rows) - 1))
 
         models_t = self.query_one("#cluster-models-table", DataTable)
+        prev_m_cursor = models_t.cursor_row
         models_t.clear()
         for row in model_rows:
             models_t.add_row(*row)
@@ -214,6 +218,8 @@ class ClusterScreen(Screen):
                 "[dim]—[/]", "[dim]—[/]",
                 "[dim]No models running[/]",
             )
+        elif prev_m_cursor is not None:
+            models_t.move_cursor(row=min(prev_m_cursor, len(model_rows) - 1))
 
     def _apply_no_head(self, message: str = "Start a node with --head") -> None:
         """Show empty state when no head node is reachable."""

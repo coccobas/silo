@@ -143,6 +143,8 @@ class ServersScreen(Screen):
         counts.memory_pressure = mem_pressure
 
         table = self.query_one("#server-table", DataTable)
+        # Preserve cursor position across refresh
+        prev_cursor = table.cursor_row
         table.clear()
         for node, name, repo, port, pid, status in rows:
             style = {
@@ -157,6 +159,9 @@ class ServersScreen(Screen):
                 f"[{style}]{pid}[/]",
                 f"[{style}]{status}[/]",
             )
+        # Restore cursor position
+        if prev_cursor is not None and rows:
+            table.move_cursor(row=min(prev_cursor, len(rows) - 1))
 
     def on_data_table_row_highlighted(
         self, event: DataTable.RowHighlighted
