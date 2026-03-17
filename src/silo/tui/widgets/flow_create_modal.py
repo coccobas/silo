@@ -55,7 +55,7 @@ def _load_available_models() -> list[tuple[str, str, str]]:
         from silo.config.loader import load_config
 
         config = load_config()
-        clients = build_clients(config.nodes)
+        clients = build_clients(config.nodes, discover=True)
         local_name = local_node_name()
 
         models: list[tuple[str, str, str]] = []
@@ -106,6 +106,58 @@ def _load_available_models() -> list[tuple[str, str, str]]:
         return []
 
 
+def _load_available_nodes() -> list[str]:
+    """Load all known node names from config, discovery, and cluster status.
+
+    Returns a list of unique node names.
+    """
+    try:
+        from silo.agent.client import build_clients, local_node_name
+        from silo.config.loader import load_config
+
+        config = load_config()
+        clients = build_clients(config.nodes, discover=True)
+
+        nodes: list[str] = []
+        for name in clients:
+            if name not in nodes:
+                nodes.append(name)
+
+        # Also check cluster workers from head node
+        cluster_nodes = _fetch_cluster_nodes()
+        for name in cluster_nodes:
+            if name not in nodes:
+                nodes.append(name)
+
+        return nodes
+    except Exception:
+        import platform
+
+        return [platform.node().split(".")[0]]
+
+
+def _fetch_cluster_nodes() -> list[str]:
+    """Fetch node names from the cluster head, if available."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    try:
+        from silo.config.loader import load_config
+
+        config = load_config()
+        head_port = getattr(config, "agent_head_port", None)
+        if head_port is None:
+            return []
+        url = f"http://127.0.0.1:{head_port}/cluster/status"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+            return [w["name"] for w in data.get("workers", []) if "name" in w]
+    except Exception:
+        return []
+
+
 class FlowCreateModal(ModalScreen[FlowDraft | None]):
     """Modal to create a new flow definition with multiple steps."""
 
@@ -133,14 +185,11 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
         if not model_options:
             model_options = [("(no models configured)", "")]
 
-        # Build unique node list for the node selector
-        seen_nodes: list[str] = []
-        for _label, _name, node in self._available_models:
-            if node not in seen_nodes:
-                seen_nodes.append(node)
+        # Build node list from all known nodes (config, discovery, cluster)
+        all_nodes = _load_available_nodes()
         self._node_options: list[tuple[str, str]] = [
             ("(auto)", ""),
-            *((n, n) for n in seen_nodes),
+            *((n, n) for n in all_nodes),
         ]
 
         with Vertical(id="flow-create-dialog"):
