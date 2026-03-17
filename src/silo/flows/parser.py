@@ -107,6 +107,44 @@ def parse_flow(path: Path) -> FlowDefinition:
     )
 
 
+def save_flow(flow: FlowDefinition, flows_dir: Path) -> Path:
+    """Save a flow definition to a YAML file.
+
+    Args:
+        flow: The flow definition to save.
+        flows_dir: Directory to save the YAML file in.
+
+    Returns:
+        Path to the saved file.
+    """
+    flows_dir.mkdir(parents=True, exist_ok=True)
+    path = flows_dir / f"{flow.name}.yaml"
+
+    data: dict = {"name": flow.name}
+    if flow.description:
+        data["description"] = flow.description
+
+    steps_data = []
+    for step in flow.steps:
+        step_dict: dict = {"id": step.id, "type": step.type}
+        if step.model:
+            step_dict["model"] = step.model
+        if step.input:
+            step_dict["input"] = step.input
+        if step.map:
+            step_dict["map"] = True
+        steps_data.append(step_dict)
+    data["steps"] = steps_data
+
+    if flow.output:
+        data["output"] = flow.output
+
+    with open(path, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+    return path
+
+
 def list_flows(flows_dir: Path | None = None) -> list[FlowDefinition]:
     """List all flow definitions in a directory.
 

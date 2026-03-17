@@ -57,7 +57,8 @@ def create_tui_app():
 
         def on_mount(self) -> None:
             self.downloads = DownloadTracker()
-            self.wake_status = None  # Set by external wake listener
+            self.wake_status = None  # Updated by wake listener callback
+            self._wake_listener = None  # Active WakeWordListener instance
             self.switch_mode("dashboard")
 
 
@@ -66,6 +67,10 @@ def create_tui_app():
 
             def on_confirm(confirmed: bool) -> None:
                 if confirmed:
+                    # Stop wake listener before exiting
+                    if self._wake_listener is not None:
+                        self._wake_listener.stop()
+                        self._wake_listener = None
                     self.exit()
 
             self.push_screen(ConfirmModal("Quit Silo?"), on_confirm)

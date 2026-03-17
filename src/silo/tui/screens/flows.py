@@ -16,6 +16,8 @@ class FlowsScreen(Screen):
     BINDINGS = [
         ("r", "refresh", "Refresh"),
         ("enter", "run_selected", "Run Flow"),
+        ("n", "new_flow", "New Flow"),
+        ("d", "delete_flow", "Delete Flow"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -44,9 +46,10 @@ class FlowsScreen(Screen):
 
     @work(thread=True)
     def _load_flows(self) -> None:
+        from silo.config.paths import CONFIG_DIR
         from silo.flows.parser import list_flows
 
-        flows = list_flows()
+        flows = list_flows(CONFIG_DIR / "flows")
         rows = [
             (
                 flow.name,
@@ -82,12 +85,13 @@ class FlowsScreen(Screen):
         self._show_steps(flow_name)
 
     def _show_steps(self, flow_name: str) -> None:
+        from silo.config.paths import CONFIG_DIR
         from silo.flows.parser import list_flows
 
         step_table = self.query_one("#step-table", DataTable)
         step_table.clear()
 
-        flows = list_flows()
+        flows = list_flows(CONFIG_DIR / "flows")
         for flow in flows:
             if flow.name == flow_name:
                 for step in flow.steps:
@@ -111,10 +115,11 @@ class FlowsScreen(Screen):
 
     @work(thread=True)
     def _run_flow(self, flow_name: str) -> None:
+        from silo.config.paths import CONFIG_DIR
         from silo.flows.parser import list_flows
         from silo.flows.runner import run_flow
 
-        flows = list_flows()
+        flows = list_flows(CONFIG_DIR / "flows")
         flow_def = next((f for f in flows if f.name == flow_name), None)
         if flow_def is None:
             self.app.call_from_thread(
@@ -156,3 +161,80 @@ class FlowsScreen(Screen):
             self.app.call_from_thread(
                 self.notify, f"Flow error: {exc}", severity="error"
             )
+
+    # ── Create flow ──────────────────────────────────────────────
+
+    def action_new_flow(self) -> None:
+        """Open the flow creation modal."""
+        from silo.tui.widgets.flow_create_modal import FlowCreateModal
+
+        self.app.push_screen(FlowCreateModal(), self._on_flow_created)
+
+    def _on_flow_created(self, draft) -> None:
+        """Callback when the create modal is dismissed."""
+        if draft is None:
+            return
+        self._save_flow(draft)
+
+    def _save_flow(self, draft) -> None:
+        """Save the draft flow to disk and refresh the list."""
+        from silo.config.paths import CONFIG_DIR
+        from silo.flows.parser import FlowDefinition, FlowStep, save_flow
+
+        steps = [
+            FlowStep(
+                id=s.id,
+                type=s.type,
+                model=s.model or None,
+                input=s.input or None,
+            )
+            for s in draft.steps
+        ]
+
+        # Build output reference: last step's output
+        last_step = steps[-1] if steps else None
+        output = f"$steps.{last_step.id}.output" if last_step else None
+
+        flow_def = FlowDefinition(
+            name=draft.name,
+            description=draft.description,
+            steps=steps,
+            output=output,
+        )
+
+        flows_dir = CONFIG_DIR / "flows"
+        path = save_flow(flow_def, flows_dir)
+        self.notify(f"Flow '{draft.name}' saved to {path}")
+        self.action_refresh()
+
+    # ── Delete flow ──────────────────────────────────────────────
+
+    def action_delete_flow(self) -> None:
+        """Delete the selected flow."""
+        table = self.query_one("#flow-table", DataTable)
+        if table.cursor_row is None or table.row_count == 0:
+            return
+        flow_name = str(table.get_cell_at((table.cursor_row, 0)))
+        if flow_name.startswith("["):
+            return
+
+        from silo.tui.widgets.confirm_modal import ConfirmModal
+
+        self.app.push_screen(
+            ConfirmModal(f"Delete flow '{flow_name}'?"),
+            lambda confirmed: self._do_delete_flow(flow_name, confirmed),
+        )
+
+    def _do_delete_flow(self, flow_name: str, confirmed: bool) -> None:
+        if not confirmed:
+            return
+
+        from silo.config.paths import CONFIG_DIR
+
+        flow_path = CONFIG_DIR / "flows" / f"{flow_name}.yaml"
+        if flow_path.exists():
+            flow_path.unlink()
+            self.notify(f"Flow '{flow_name}' deleted")
+        else:
+            self.notify(f"Flow file not found: {flow_path}", severity="error")
+        self.action_refresh()

@@ -34,7 +34,7 @@ class WakeWordDetector:
         except ImportError as e:
             raise ImportError(
                 "Wake word detection requires openwakeword. "
-                "Install with: uv pip install 'silo[wake]'"
+                "Install with: silo setup install wake"
             ) from e
 
         # Download default models if needed

@@ -31,6 +31,7 @@ def cli_app():
         ps_cmd,
         run_cmd,
         serve_cmd,
+        setup_cmd,
         ui_cmd,
         up_cmd,
         wake_cmd,

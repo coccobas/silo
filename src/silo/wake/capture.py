@@ -44,7 +44,7 @@ class AudioCapture:
         except ImportError as e:
             raise ImportError(
                 "Wake word detection requires sounddevice and numpy. "
-                "Install with: uv pip install 'silo[wake]'"
+                "Install with: silo setup install wake"
             ) from e
 
         def callback(indata: np.ndarray, frames: int, time_info: Any, status: Any) -> None:

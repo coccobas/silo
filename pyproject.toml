@@ -44,9 +44,6 @@ wake = [
     "sounddevice>=0.5",
     "numpy>=1.26",
     "onnxruntime>=1.16",
-    # openwakeword must be installed manually:
-    #   pip install openwakeword --no-deps
-    #   (tflite-runtime lacks Python 3.12+ wheels on Linux)
 ]
 discovery = [
     "zeroconf>=0.132",
