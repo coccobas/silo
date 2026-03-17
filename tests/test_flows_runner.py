@@ -22,6 +22,20 @@ class TestResolveInput:
     def test_literal_string(self):
         assert _resolve_input("plain text", None, {}) == "plain text"
 
+    def test_template_string(self):
+        results = {"transcribe": "hello world"}
+        resolved = _resolve_input(
+            "Summarize: {{ steps.transcribe.output }}", None, results
+        )
+        assert resolved == "Summarize: hello world"
+
+    def test_template_multiple_refs(self):
+        results = {"a": "first", "b": "second"}
+        resolved = _resolve_input(
+            "{{ steps.a.output }} and {{ steps.b.output }}", None, results
+        )
+        assert resolved == "first and second"
+
 
 class TestRunFlow:
     def test_glob_step(self, tmp_path, monkeypatch):
@@ -58,23 +72,23 @@ class TestRunFlow:
         assert not result.success
         assert "Unknown step type" in (result.error or "")
 
-    def test_stt_step_not_implemented(self):
+    def test_stt_step_model_not_found(self, tmp_config_dir):
         flow = FlowDefinition(
             name="test",
             steps=[FlowStep(id="stt", type="audio.transcribe", model="whisper")],
         )
         result = run_flow(flow, input_data="audio.wav")
         assert not result.success
-        assert "not yet connected" in (result.error or "")
+        assert "not found" in (result.error or "")
 
-    def test_chat_step_not_implemented(self):
+    def test_chat_step_model_not_found(self, tmp_config_dir):
         flow = FlowDefinition(
             name="test",
             steps=[FlowStep(id="chat", type="text.generate", model="llama")],
         )
         result = run_flow(flow, input_data="Hello")
         assert not result.success
-        assert "not yet connected" in (result.error or "")
+        assert "not found" in (result.error or "")
 
     def test_multi_step_flow(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

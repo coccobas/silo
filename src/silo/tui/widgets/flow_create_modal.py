@@ -17,6 +17,9 @@ _STEP_TYPES: list[tuple[str, str]] = [
     ("File Write", "fs.write"),
 ]
 
+# Step types that need a model
+_MODEL_TYPES = {"text.generate", "audio.transcribe"}
+
 
 @dataclass(frozen=True)
 class FlowStepDraft:
@@ -38,7 +41,67 @@ class FlowDraft:
 
 
 def _needs_model(step_type: str) -> bool:
-    return step_type in ("text.generate", "audio.transcribe")
+    return step_type in _MODEL_TYPES
+
+
+def _load_available_models() -> list[tuple[str, str, str]]:
+    """Load configured models with their node and status.
+
+    Returns list of (display_label, model_name, node_name) tuples.
+    """
+    try:
+        from silo.agent.client import build_clients
+        from silo.config.loader import load_config
+
+        config = load_config()
+        clients = build_clients(config.nodes)
+
+        models: list[tuple[str, str, str]] = []
+        for model_cfg in config.models:
+            node_name = model_cfg.node or "local"
+            client = clients.get(node_name)
+
+            status = "?"
+            if client is not None:
+                try:
+                    info = client.get_status(
+                        model_cfg.name,
+                        port=model_cfg.port,
+                        repo_id=model_cfg.repo,
+                    )
+                    status = info.status
+                except Exception:
+                    status = "unreachable"
+
+            status_icon = {
+                "running": "[green]●[/]",
+                "stopped": "[red]●[/]",
+            }.get(status, "[dim]●[/]")
+
+            label = f"{status_icon} {model_cfg.name} [dim]({node_name}:{model_cfg.port})[/]"
+            models.append((label, model_cfg.name, node_name))
+
+        # Also scan for running processes not in config
+        for node_name, client in clients.items():
+            try:
+                processes = client.list_processes()
+            except Exception:
+                continue
+            config_names = {
+                m.name for m in config.models
+                if (m.node or "local") == node_name
+            }
+            for proc in processes:
+                if proc.name not in config_names and proc.status == "running":
+                    label = (
+                        f"[green]●[/] {proc.name} "
+                        f"[dim]({node_name}:{proc.port})[/]"
+                    )
+                    models.append((label, proc.name, node_name))
+
+        return models
+    except Exception:
+        return []
 
 
 class FlowCreateModal(ModalScreen[FlowDraft | None]):
@@ -53,11 +116,21 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
     def __init__(self) -> None:
         super().__init__()
         self._steps: list[FlowStepDraft] = []
+        self._available_models: list[tuple[str, str, str]] = []
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
     def compose(self) -> ComposeResult:
+        # Load available models for the dropdown
+        self._available_models = _load_available_models()
+
+        model_options: list[tuple[str, str]] = [
+            (label, name) for label, name, _node in self._available_models
+        ]
+        if not model_options:
+            model_options = [("(no models configured)", "")]
+
         with Vertical(id="flow-create-dialog"):
             yield Static("[b]Create Flow[/b]", id="flow-create-title")
 
@@ -105,9 +178,16 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
                     )
                 with Horizontal(classes="form-row", id="step-model-row"):
                     yield Label("Model:")
+                    yield Select(
+                        model_options,
+                        value=model_options[0][1],
+                        id="step-model-select",
+                    )
+                with Horizontal(classes="form-row", id="step-model-custom-row"):
+                    yield Label("Custom:")
                     yield Input(
-                        placeholder="e.g. mlx-community/Llama-3.2-1B-4bit",
-                        id="step-model",
+                        placeholder="or type model name / repo (overrides above)",
+                        id="step-model-custom",
                     )
                 with Horizontal(classes="form-row"):
                     yield Label("Input:")
@@ -144,7 +224,9 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
 
     def _update_model_visibility(self) -> None:
         step_type = str(self.query_one("#step-type", Select).value)
-        self.query_one("#step-model-row").display = _needs_model(step_type)
+        show = _needs_model(step_type)
+        self.query_one("#step-model-row").display = show
+        self.query_one("#step-model-custom-row").display = show
 
     def _render_steps_list(self) -> None:
         """Update the steps list display."""
@@ -164,6 +246,13 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
             )
         panel.update("\n".join(lines))
 
+    def _get_selected_model(self) -> str:
+        """Get model from custom input (priority) or dropdown."""
+        custom = self.query_one("#step-model-custom", Input).value.strip()
+        if custom:
+            return custom
+        return str(self.query_one("#step-model-select", Select).value)
+
     def _add_step(self) -> None:
         """Validate and add the current step to the list."""
         step_id = self.query_one("#step-id", Input).value.strip()
@@ -177,7 +266,7 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
             return
 
         step_type = str(self.query_one("#step-type", Select).value)
-        model = self.query_one("#step-model", Input).value.strip()
+        model = self._get_selected_model() if _needs_model(step_type) else ""
         step_input = self.query_one("#step-input", Input).value.strip()
 
         if _needs_model(step_type) and not model:
@@ -195,7 +284,7 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
 
         # Clear step form for next entry
         self.query_one("#step-id", Input).value = ""
-        self.query_one("#step-model", Input).value = ""
+        self.query_one("#step-model-custom", Input).value = ""
         self.query_one("#step-input", Input).value = ""
         self.query_one("#step-id", Input).focus()
 

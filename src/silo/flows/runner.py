@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import io
+import json
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -28,6 +32,77 @@ class FlowResult:
     step_results: list[StepResult] = field(default_factory=list)
     final_output: Any = None
     error: str | None = None
+
+
+def _find_model_endpoint(model_name: str) -> tuple[str, int]:
+    """Find the host and port for a model by looking up config and running processes.
+
+    Searches config models by name, then by repo_id. For remote nodes,
+    uses the node's host address instead of the model's bind address.
+
+    Returns:
+        (host, port) tuple for the running model server.
+
+    Raises:
+        ValueError: If the model is not found or not running.
+    """
+    from silo.agent.client import build_clients
+    from silo.config.loader import load_config
+
+    config = load_config()
+    clients = build_clients(config.nodes)
+
+    # Try to match by model name first, then by repo_id
+    for model_cfg in config.models:
+        if model_cfg.name == model_name or model_cfg.repo == model_name:
+            node_name = model_cfg.node or "local"
+            client = clients.get(node_name)
+            if client is None:
+                raise ValueError(
+                    f"Node '{node_name}' not found for model '{model_name}'"
+                )
+
+            status = client.get_status(
+                model_cfg.name,
+                port=model_cfg.port,
+                repo_id=model_cfg.repo,
+            )
+            if status.status != "running":
+                raise ValueError(
+                    f"Model '{model_name}' is not running on {node_name}. "
+                    f"Start it with: silo up"
+                )
+
+            # For remote nodes, use the node's host, not the model's bind address
+            if node_name == "local":
+                host = model_cfg.host
+            else:
+                node_cfg = next(
+                    (n for n in config.nodes if n.name == node_name), None
+                )
+                host = node_cfg.host if node_cfg else model_cfg.host
+
+            return host, model_cfg.port
+
+    # Not in config — scan all nodes for a running process with this name
+    for node_name, client in clients.items():
+        try:
+            processes = client.list_processes()
+        except Exception:
+            continue
+        for proc in processes:
+            if proc.name == model_name and proc.status == "running":
+                if node_name == "local":
+                    return "127.0.0.1", proc.port
+                node_cfg = next(
+                    (n for n in config.nodes if n.name == node_name), None
+                )
+                host = node_cfg.host if node_cfg else "127.0.0.1"
+                return host, proc.port
+
+    raise ValueError(
+        f"Model '{model_name}' not found in config or running processes"
+    )
 
 
 def run_flow(flow: FlowDefinition, input_data: Any = None) -> FlowResult:
@@ -104,16 +179,28 @@ def _resolve_input(
             step_id = parts[1]
             return results.get(step_id)
 
+    # Resolve embedded references in template strings
+    # e.g., "Summarize: {{ steps.transcribe.output }}"
+    if "{{" in input_ref and "}}" in input_ref:
+        import re
+
+        def _replace(match: re.Match) -> str:
+            expr = match.group(1).strip()
+            if expr.startswith("steps."):
+                parts = expr.split(".")
+                if len(parts) >= 2:
+                    step_id = parts[1]
+                    val = results.get(step_id)
+                    return str(val) if val is not None else ""
+            return match.group(0)
+
+        return re.sub(r"\{\{\s*(.*?)\s*\}\}", _replace, input_ref)
+
     return input_ref
 
 
 def _execute_step(step: FlowStep, input_data: Any) -> Any:
-    """Execute a single flow step.
-
-    This is a stub executor that dispatches to the appropriate
-    backend based on step type. In a real implementation, this
-    would call the actual model APIs.
-    """
+    """Execute a single flow step by dispatching to the appropriate handler."""
     if step.type == "audio.transcribe":
         return _execute_stt(step, input_data)
     if step.type == "text.generate":
@@ -127,28 +214,107 @@ def _execute_step(step: FlowStep, input_data: Any) -> Any:
 
 
 def _execute_stt(step: FlowStep, input_data: Any) -> str:
-    """Execute an STT step by calling the local model API."""
-
+    """Execute an STT step by calling the model's OpenAI-compatible API."""
     if not step.model:
         raise ValueError("STT step requires a 'model' field")
 
-    # In a real implementation, this would determine the port from config
-    # For now, this is a placeholder
-    raise NotImplementedError(
-        f"STT execution for model '{step.model}' not yet connected. "
-        "Use 'silo serve' to start the model first."
+    host, port = _find_model_endpoint(step.model)
+    url = f"http://{host}:{port}/v1/audio/transcriptions"
+
+    # input_data should be audio bytes or a file path
+    if isinstance(input_data, (str, Path)):
+        audio_path = Path(input_data)
+        if audio_path.exists():
+            audio_data = audio_path.read_bytes()
+            filename = audio_path.name
+        else:
+            raise ValueError(f"Audio file not found: {input_data}")
+    elif isinstance(input_data, bytes):
+        audio_data = input_data
+        filename = "audio.wav"
+    else:
+        raise ValueError(
+            f"STT step expects audio file path or bytes, got {type(input_data).__name__}"
+        )
+
+    # Build multipart form data
+    boundary = "----SiloFlowBoundary"
+    body = io.BytesIO()
+
+    # model field
+    body.write(f"--{boundary}\r\n".encode())
+    body.write(b'Content-Disposition: form-data; name="model"\r\n\r\n')
+    body.write(f"{step.model}\r\n".encode())
+
+    # file field
+    body.write(f"--{boundary}\r\n".encode())
+    body.write(
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode()
     )
+    body.write(b"Content-Type: application/octet-stream\r\n\r\n")
+    body.write(audio_data)
+    body.write(b"\r\n")
+
+    body.write(f"--{boundary}--\r\n".encode())
+
+    req = urllib.request.Request(
+        url,
+        data=body.getvalue(),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read())
+            return result.get("text", "")
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else str(e)
+        raise RuntimeError(f"STT request failed ({e.code}): {error_body}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(
+            f"Cannot reach model server at {url}: {e.reason}"
+        ) from e
 
 
 def _execute_chat(step: FlowStep, input_data: Any) -> str:
-    """Execute a chat step by calling the local model API."""
+    """Execute a chat step by calling the model's OpenAI-compatible API."""
     if not step.model:
         raise ValueError("Chat step requires a 'model' field")
 
-    raise NotImplementedError(
-        f"Chat execution for model '{step.model}' not yet connected. "
-        "Use 'silo serve' to start the model first."
+    host, port = _find_model_endpoint(step.model)
+    url = f"http://{host}:{port}/v1/chat/completions"
+
+    # Build the prompt from input
+    prompt = str(input_data) if input_data is not None else ""
+
+    payload = json.dumps({
+        "model": step.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+    }).encode()
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read())
+            choices = result.get("choices", [])
+            if choices:
+                return choices[0].get("message", {}).get("content", "")
+            return ""
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else str(e)
+        raise RuntimeError(f"Chat request failed ({e.code}): {error_body}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(
+            f"Cannot reach model server at {url}: {e.reason}"
+        ) from e
 
 
 def _execute_glob(input_data: Any) -> list[str]:

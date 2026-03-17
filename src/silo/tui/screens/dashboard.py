@@ -157,8 +157,18 @@ class DashboardScreen(Screen):
         # ── Merge cluster workers not already in config ──
         cluster_data = self._fetch_cluster_status()
         if cluster_data is not None:
+            # The head node reports itself in the worker list under its
+            # hostname, but we already show it as "local".  Skip it and
+            # any worker whose host resolves to a node we've already seen.
+            head_name = cluster_data.get("head", "")
             for w in cluster_data.get("workers", []):
                 if w["name"] in seen_nodes:
+                    continue
+                # Skip the head node — already shown as "local"
+                if w["name"] == head_name:
+                    continue
+                # Also skip workers on 127.0.0.1 (another alias for local)
+                if w.get("host", "") in ("127.0.0.1", "localhost"):
                     continue
                 seen_nodes.add(w["name"])
                 status = w.get("status", "unknown")

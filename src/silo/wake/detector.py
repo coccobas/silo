@@ -37,8 +37,16 @@ class WakeWordDetector:
                 "Install with: silo setup install wake"
             ) from e
 
-        # Download default models if needed
-        openwakeword.utils.download_models()
+        # Download default models if needed.
+        # Disable tqdm progress bars — they create multiprocessing locks
+        # that fail inside thread pool executors (e.g., Textual workers).
+        import os
+
+        os.environ["TQDM_DISABLE"] = "1"
+        try:
+            openwakeword.utils.download_models()
+        finally:
+            os.environ.pop("TQDM_DISABLE", None)
 
         model_kwargs: dict[str, Any] = {
             "inference_framework": "onnx",
