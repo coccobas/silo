@@ -119,7 +119,10 @@ class ClusterSpawnModal(ModalScreen[dict | None]):
         if event.row_key is None:
             return
         table = self.query_one("#spawn-models-table", DataTable)
-        row_idx = list(table.rows.keys()).index(event.row_key)
+        keys = list(table.rows.keys())
+        if event.row_key not in keys:
+            return
+        row_idx = keys.index(event.row_key)
         repo_id = str(table.get_cell_at((row_idx, 0)))
         if repo_id.startswith("["):
             return
