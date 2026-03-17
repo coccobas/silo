@@ -26,6 +26,57 @@ from silo.agent.schemas import (
 logger = logging.getLogger(__name__)
 
 
+def _detect_local_ip() -> str:
+    """Detect the machine's primary non-localhost IP address.
+
+    Checks all interfaces to find VPN IPs (Netbird/WireGuard use 100.x.x.x)
+    alongside regular LAN IPs. Prefers VPN IPs for cluster display.
+    """
+    import socket
+
+    ips: list[str] = []
+
+    # Method 1: default route IP
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ips.append(s.getsockname()[0])
+        s.close()
+    except Exception:
+        pass
+
+    # Method 2: all IPs from hostname resolution
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127.") and ip not in ips:
+                ips.append(ip)
+    except Exception:
+        pass
+
+    # Method 3: try common VPN interface names
+    try:
+        for iface in ("wt0", "netbird0", "utun", "wg0"):
+            try:
+                for info in socket.getaddrinfo(iface, None, socket.AF_INET):
+                    ip = info[4][0]
+                    if not ip.startswith("127.") and ip not in ips:
+                        ips.append(ip)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    if not ips:
+        return "127.0.0.1"
+
+    # Prefer VPN IPs (100.x.x.x for Netbird, 10.x.x.x for others)
+    for ip in ips:
+        if ip.startswith("100.") or ip.startswith("10."):
+            return ip
+    return ips[0]
+
+
 def create_agent_app(
     node_name: str | None = None,
     port: int = 9900,
@@ -90,7 +141,8 @@ def create_agent_app(
             # Register self as a worker
             from silo import __version__
 
-            cluster.register_worker(node_name, "127.0.0.1", port)
+            local_ip = _detect_local_ip()
+            cluster.register_worker(node_name, local_ip, port)
             cluster.record_health_success(node_name, version=__version__)
 
             # Auto-discover existing workers via mDNS
