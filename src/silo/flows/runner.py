@@ -34,11 +34,17 @@ class FlowResult:
     error: str | None = None
 
 
-def _find_model_endpoint(model_name: str) -> tuple[str, int]:
+def _find_model_endpoint(
+    model_name: str, node_hint: str | None = None
+) -> tuple[str, int]:
     """Find the host and port for a model by looking up config and running processes.
 
     Searches config models by name, then by repo_id. For remote nodes,
     uses the node's host address instead of the model's bind address.
+
+    Args:
+        model_name: Model name or repo ID to look up.
+        node_hint: Optional node name to constrain the search to.
 
     Returns:
         (host, port) tuple for the running model server.
@@ -57,6 +63,11 @@ def _find_model_endpoint(model_name: str) -> tuple[str, int]:
     for model_cfg in config.models:
         if model_cfg.name == model_name or model_cfg.repo == model_name:
             node_name = model_cfg.node or local_name
+
+            # Skip if a node hint is given and this model is on a different node
+            if node_hint and node_name != node_hint:
+                continue
+
             client = clients.get(node_name)
             if client is None:
                 raise ValueError(
@@ -86,7 +97,12 @@ def _find_model_endpoint(model_name: str) -> tuple[str, int]:
             return host, model_cfg.port
 
     # Not in config — scan all nodes for a running process with this name
-    for node_name, client in clients.items():
+    nodes_to_scan = (
+        {node_hint: clients[node_hint]}
+        if node_hint and node_hint in clients
+        else clients
+    )
+    for node_name, client in nodes_to_scan.items():
         try:
             processes = client.list_processes()
         except Exception:
@@ -219,7 +235,7 @@ def _execute_stt(step: FlowStep, input_data: Any) -> str:
     if not step.model:
         raise ValueError("STT step requires a 'model' field")
 
-    host, port = _find_model_endpoint(step.model)
+    host, port = _find_model_endpoint(step.model, node_hint=step.node)
     url = f"http://{host}:{port}/v1/audio/transcriptions"
 
     # input_data should be audio bytes or a file path
@@ -283,7 +299,7 @@ def _execute_chat(step: FlowStep, input_data: Any) -> str:
     if not step.model:
         raise ValueError("Chat step requires a 'model' field")
 
-    host, port = _find_model_endpoint(step.model)
+    host, port = _find_model_endpoint(step.model, node_hint=step.node)
     url = f"http://{host}:{port}/v1/chat/completions"
 
     # Build the prompt from input

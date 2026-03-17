@@ -28,6 +28,7 @@ class FlowStepDraft:
     id: str
     type: str
     model: str
+    node: str
     input: str
 
 
@@ -132,6 +133,16 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
         if not model_options:
             model_options = [("(no models configured)", "")]
 
+        # Build unique node list for the node selector
+        seen_nodes: list[str] = []
+        for _label, _name, node in self._available_models:
+            if node not in seen_nodes:
+                seen_nodes.append(node)
+        self._node_options: list[tuple[str, str]] = [
+            ("(auto)", ""),
+            *((n, n) for n in seen_nodes),
+        ]
+
         with Vertical(id="flow-create-dialog"):
             yield Static("[b]Create Flow[/b]", id="flow-create-title")
 
@@ -184,6 +195,13 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
                         value=model_options[0][1],
                         id="step-model-select",
                     )
+                with Horizontal(classes="form-row", id="step-node-row"):
+                    yield Label("Node:")
+                    yield Select(
+                        self._node_options,
+                        value="",
+                        id="step-node-select",
+                    )
                 with Horizontal(classes="form-row", id="step-model-custom-row"):
                     yield Label("Custom:")
                     yield Input(
@@ -227,6 +245,7 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
         step_type = str(self.query_one("#step-type", Select).value)
         show = _needs_model(step_type)
         self.query_one("#step-model-row").display = show
+        self.query_one("#step-node-row").display = show
         self.query_one("#step-model-custom-row").display = show
 
     def _render_steps_list(self) -> None:
@@ -239,11 +258,12 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
         lines: list[str] = []
         for i, step in enumerate(self._steps, 1):
             model_part = f"  model: {step.model}" if step.model else ""
+            node_part = f" @{step.node}" if step.node else ""
             input_part = f"  input: {step.input}" if step.input else ""
             lines.append(
                 f"  [bold]{i}.[/] [cyan]{step.id}[/] "
                 f"[dim]({step.type})[/]"
-                f"{model_part}{input_part}"
+                f"{model_part}{node_part}{input_part}"
             )
         panel.update("\n".join(lines))
 
@@ -267,10 +287,12 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
             return
 
         step_type = str(self.query_one("#step-type", Select).value)
-        model = self._get_selected_model() if _needs_model(step_type) else ""
+        is_model_step = _needs_model(step_type)
+        model = self._get_selected_model() if is_model_step else ""
+        node = str(self.query_one("#step-node-select", Select).value) if is_model_step else ""
         step_input = self.query_one("#step-input", Input).value.strip()
 
-        if _needs_model(step_type) and not model:
+        if is_model_step and not model:
             self.notify("This step type requires a model", severity="error")
             return
 
@@ -278,6 +300,7 @@ class FlowCreateModal(ModalScreen[FlowDraft | None]):
             id=step_id,
             type=step_type,
             model=model,
+            node=node,
             input=step_input,
         )
         self._steps = [*self._steps, step]

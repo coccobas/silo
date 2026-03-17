@@ -36,7 +36,7 @@ class FlowsScreen(Screen):
         flow_t.cursor_type = "row"
 
         step_t = self.query_one("#step-table", DataTable)
-        step_t.add_columns("ID", "TYPE", "MODEL", "INPUT", "MAP")
+        step_t.add_columns("ID", "TYPE", "MODEL", "NODE", "INPUT", "MAP")
         step_t.cursor_type = "row"
 
         self.action_refresh()
@@ -99,6 +99,7 @@ class FlowsScreen(Screen):
                         step.id,
                         step.type,
                         step.model or "—",
+                        step.node or "[dim]auto[/]",
                         step.input or "—",
                         "Yes" if step.map else "No",
                     )
@@ -186,6 +187,7 @@ class FlowsScreen(Screen):
                 id=s.id,
                 type=s.type,
                 model=s.model or None,
+                node=s.node or None,
                 input=s.input or None,
             )
             for s in draft.steps

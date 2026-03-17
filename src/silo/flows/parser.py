@@ -15,6 +15,7 @@ class FlowStep:
     id: str
     type: str  # e.g., "audio.transcribe", "text.generate", "fs.glob", "fs.write"
     model: str | None = None
+    node: str | None = None
     input: str | None = None
     map: bool = False
 
@@ -85,6 +86,7 @@ def parse_flow(path: Path) -> FlowDefinition:
             id=step_id,
             type=step_type,
             model=step_data.get("model"),
+            node=step_data.get("node"),
             input=step_input,
             map=step_data.get("map", False),
         ))
@@ -129,6 +131,8 @@ def save_flow(flow: FlowDefinition, flows_dir: Path) -> Path:
         step_dict: dict = {"id": step.id, "type": step.type}
         if step.model:
             step_dict["model"] = step.model
+        if step.node:
+            step_dict["node"] = step.node
         if step.input:
             step_dict["input"] = step.input
         if step.map:

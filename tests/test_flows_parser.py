@@ -91,6 +91,33 @@ steps:
         with pytest.raises(ValueError, match="expected a YAML mapping"):
             parse_flow(flow_file)
 
+    def test_step_with_node(self, tmp_path):
+        flow_file = tmp_path / "test.yaml"
+        flow_file.write_text("""
+name: remote
+steps:
+  - id: generate
+    type: text.generate
+    model: llama
+    node: gpu-server
+    input: $input
+""")
+        flow = parse_flow(flow_file)
+        assert flow.steps[0].node == "gpu-server"
+
+    def test_step_without_node(self, tmp_path):
+        flow_file = tmp_path / "test.yaml"
+        flow_file.write_text("""
+name: local
+steps:
+  - id: generate
+    type: text.generate
+    model: llama
+    input: $input
+""")
+        flow = parse_flow(flow_file)
+        assert flow.steps[0].node is None
+
     def test_map_step(self, tmp_path):
         flow_file = tmp_path / "test.yaml"
         flow_file.write_text("""

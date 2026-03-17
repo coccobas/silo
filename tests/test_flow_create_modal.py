@@ -14,16 +14,28 @@ class TestFlowStepDraft:
             id="transcribe",
             type="audio.transcribe",
             model="mlx-community/whisper-large-v3-turbo",
+            node="gpu-server",
             input="$input",
         )
         assert step.id == "transcribe"
         assert step.type == "audio.transcribe"
         assert step.model == "mlx-community/whisper-large-v3-turbo"
+        assert step.node == "gpu-server"
         assert step.input == "$input"
+
+    def test_creation_no_node(self):
+        step = FlowStepDraft(
+            id="transcribe",
+            type="audio.transcribe",
+            model="whisper",
+            node="",
+            input="$input",
+        )
+        assert step.node == ""
 
     def test_immutable(self):
         step = FlowStepDraft(
-            id="test", type="fs.glob", model="", input=""
+            id="test", type="fs.glob", model="", node="", input=""
         )
         with pytest.raises(AttributeError):
             step.id = "changed"
@@ -39,6 +51,7 @@ class TestFlowDraft:
                     id="step1",
                     type="text.generate",
                     model="some-model",
+                    node="my-node",
                     input="hello",
                 ),
             ],
@@ -86,6 +99,39 @@ class TestSaveFlow:
         assert reloaded.steps[0].model == "test-model"
         assert reloaded.steps[0].input == "Say hello"
         assert reloaded.output == "$steps.greet.output"
+
+    def test_save_and_reload_with_node(self, tmp_path):
+        flow = FlowDefinition(
+            name="remote-flow",
+            steps=[
+                FlowStep(
+                    id="generate",
+                    type="text.generate",
+                    model="llama",
+                    node="gpu-server",
+                    input="Hello",
+                ),
+            ],
+        )
+        path = save_flow(flow, tmp_path)
+        reloaded = parse_flow(path)
+        assert reloaded.steps[0].node == "gpu-server"
+
+    def test_save_and_reload_without_node(self, tmp_path):
+        flow = FlowDefinition(
+            name="local-flow",
+            steps=[
+                FlowStep(
+                    id="generate",
+                    type="text.generate",
+                    model="llama",
+                    input="Hello",
+                ),
+            ],
+        )
+        path = save_flow(flow, tmp_path)
+        reloaded = parse_flow(path)
+        assert reloaded.steps[0].node is None
 
     def test_save_creates_directory(self, tmp_path):
         nested = tmp_path / "a" / "b" / "flows"
