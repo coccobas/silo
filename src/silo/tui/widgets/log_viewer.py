@@ -36,10 +36,20 @@ class LogViewer(RichLog):
     @log_path.setter
     def log_path(self, path: Path | None) -> None:
         self._log_path = path
-        self._offset = 0
         self.clear()
-        if path is not None:
-            self._poll_file()
+        if path is not None and path.exists():
+            # Show last N lines, then tail from there
+            try:
+                text = path.read_text(errors="replace")
+                lines = text.splitlines()
+                tail = lines[-50:] if len(lines) > 50 else lines
+                for line in tail:
+                    self.write(line)
+                self._offset = path.stat().st_size
+            except OSError:
+                self._offset = 0
+        else:
+            self._offset = 0
 
     def on_mount(self) -> None:
         self._timer = self.set_interval(0.5, self._poll_file)
