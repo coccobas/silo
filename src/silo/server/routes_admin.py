@@ -6,7 +6,6 @@ import logging
 
 from fastapi import APIRouter, Request
 
-from silo.config.models import LitellmConfig
 from silo.server.admin_schemas import (
     LitellmRegisterRequest,
     LitellmStatusResponse,
@@ -47,51 +46,53 @@ def litellm_register(
     """Register (or re-register) this server with a LiteLLM proxy.
 
     If already registered with a different URL or name, deregisters
-    the old entry first.
+    the old entry first.  Uses the LiteLLM client directly to avoid
+    slow subprocess calls (like netbird status) that block the server.
     """
-    from silo.litellm.registry import (
-        deregister_model,
-        normalize_litellm_url,
-        register_model,
-    )
+    from silo.litellm.client import LitellmClient
+    from silo.litellm.registry import normalize_litellm_url
 
     state = request.app.state.litellm_state
     url = normalize_litellm_url(req.url)
+    api_key = req.api_key
     new_name = req.model_name or state.model_name or request.app.state.model_name
+
+    client = LitellmClient(url, api_key)
 
     # Deregister old if currently registered
     if state.registered and state.instance_id:
-        old_config = LitellmConfig(
-            enabled=True, url=state.url, api_key=state.api_key,
-        )
-        deregister_model(old_config, state.model_name, state.instance_id)
+        old_client = LitellmClient(state.url, state.api_key)
+        old_client.delete(state.instance_id)
 
-    # Register with new settings
-    config = LitellmConfig(enabled=True, url=url, api_key=req.api_key)
-    register_model(config, new_name, state.host, state.port, state.instance_id)
+    # Build api_base from the server's own host:port
+    # Use the request's client host (how the caller reached us) for
+    # externally-reachable address, falling back to state.host
+    client_host = request.client.host if request.client else state.host
+    serve_host = client_host if client_host not in ("127.0.0.1", "::1") else state.host
+    api_base = f"http://{serve_host}:{state.port}/v1"
+
+    client.register(new_name, api_base, state.instance_id)
 
     # Update live state
     state.registered = True
     state.url = url
-    state.api_key = req.api_key
+    state.api_key = api_key
     state.model_name = new_name
 
-    logger.info("Admin: registered '%s' with LiteLLM at %s", new_name, url)
+    logger.info("Admin: registered '%s' with LiteLLM at %s (api_base=%s)", new_name, url, api_base)
     return _litellm_status(request)
 
 
 @router.post("/litellm/deregister", response_model=LitellmStatusResponse)
 def litellm_deregister(request: Request) -> LitellmStatusResponse:
     """Deregister this server from LiteLLM."""
-    from silo.litellm.registry import deregister_model
+    from silo.litellm.client import LitellmClient
 
     state = request.app.state.litellm_state
 
     if state.registered and state.instance_id:
-        config = LitellmConfig(
-            enabled=True, url=state.url, api_key=state.api_key,
-        )
-        deregister_model(config, state.model_name, state.instance_id)
+        client = LitellmClient(state.url, state.api_key)
+        client.delete(state.instance_id)
         state.registered = False
         logger.info("Admin: deregistered '%s' from LiteLLM", state.model_name)
 
@@ -103,7 +104,7 @@ def update_model_name(
     req: ModelNameRequest, request: Request,
 ) -> ServerInfoResponse:
     """Change the model name (re-registers with LiteLLM if registered)."""
-    from silo.litellm.registry import deregister_model, register_model
+    from silo.litellm.client import LitellmClient
 
     state = request.app.state.litellm_state
     old_name = request.app.state.model_name
@@ -113,11 +114,14 @@ def update_model_name(
 
     # Re-register with LiteLLM under the new name
     if state.registered and state.instance_id:
-        config = LitellmConfig(
-            enabled=True, url=state.url, api_key=state.api_key,
-        )
-        deregister_model(config, state.model_name, state.instance_id)
-        register_model(config, req.model_name, state.host, state.port, state.instance_id)
+        client = LitellmClient(state.url, state.api_key)
+        client.delete(state.instance_id)
+
+        client_host = request.client.host if request.client else state.host
+        serve_host = client_host if client_host not in ("127.0.0.1", "::1") else state.host
+        api_base = f"http://{serve_host}:{state.port}/v1"
+        client.register(req.model_name, api_base, state.instance_id)
+
         state.model_name = req.model_name
         logger.info("Admin: renamed '%s' -> '%s' on LiteLLM", old_name, req.model_name)
     else:
