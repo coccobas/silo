@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 from silo.config.models import AppConfig, ModelConfig
 from silo.process.manager import SpawnResult
-from silo.process.pid import PidEntry
 
 
 def _make_config(*models):
@@ -66,36 +65,25 @@ class TestDownCommand:
         assert "Stop" in result.output
 
     def test_stop_specific(self, cli_runner, cli_app, tmp_config_dir):
-        entry = PidEntry(pid=1, instance_id="uuid-1")
-        with patch("silo.config.loader.load_config", return_value=AppConfig()), \
-             patch("silo.process.pid.read_pid_entry", return_value=entry), \
-             patch("silo.process.manager.stop_model", return_value=True):
+        with patch("silo.process.manager.stop_model", return_value=True):
             result = cli_runner.invoke(cli_app, ["down", "llama"])
         assert result.exit_code == 0
         assert "Stopped llama" in result.output
 
     def test_stop_not_running(self, cli_runner, cli_app, tmp_config_dir):
-        with patch("silo.config.loader.load_config", return_value=AppConfig()), \
-             patch("silo.process.pid.read_pid_entry", return_value=None), \
-             patch("silo.process.manager.stop_model", return_value=False):
+        with patch("silo.process.manager.stop_model", return_value=False):
             result = cli_runner.invoke(cli_app, ["down", "llama"])
         assert result.exit_code == 0
         assert "not running" in result.output
 
     def test_stop_all_none(self, cli_runner, cli_app, tmp_config_dir):
-        with patch("silo.config.loader.load_config", return_value=AppConfig()), \
-             patch("silo.process.pid.list_pid_entries", return_value={}):
+        with patch("silo.process.pid.list_pids", return_value={}):
             result = cli_runner.invoke(cli_app, ["down"])
         assert result.exit_code == 0
         assert "No running" in result.output
 
     def test_stop_all(self, cli_runner, cli_app, tmp_config_dir):
-        entries = {
-            "a": PidEntry(pid=1, instance_id="uuid-a"),
-            "b": PidEntry(pid=2, instance_id="uuid-b"),
-        }
-        with patch("silo.config.loader.load_config", return_value=AppConfig()), \
-             patch("silo.process.pid.list_pid_entries", return_value=entries), \
+        with patch("silo.process.pid.list_pids", return_value={"a": 1, "b": 2}), \
              patch("silo.process.manager.stop_model", return_value=True):
             result = cli_runner.invoke(cli_app, ["down"])
         assert result.exit_code == 0

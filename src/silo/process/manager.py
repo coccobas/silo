@@ -51,6 +51,7 @@ def spawn_model(
     output: str | None = None,
     pids_dir: Path | None = None,
     logs_dir: Path | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> SpawnResult:
     """Spawn a `silo serve` subprocess for a model.
 
@@ -63,6 +64,7 @@ def spawn_model(
         output: Optional output path for conversion.
         pids_dir: Override PID directory.
         logs_dir: Override logs directory.
+        extra_env: Extra environment variables for the subprocess.
 
     Returns:
         SpawnResult with PID and instance_id.
@@ -90,12 +92,15 @@ def spawn_model(
     if output:
         cmd.extend(["--output", output])
 
+    env = {**os.environ, **(extra_env or {})}
+
     with open(log_file, "a") as lf:
         proc = subprocess.Popen(
             cmd,
             stdout=lf,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=env,
         )
 
     write_pid(

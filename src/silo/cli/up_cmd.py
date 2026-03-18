@@ -49,10 +49,3 @@ def up(
             output=model.output,
         )
         console.print(f"[dim]  PID {result.pid}[/dim]")
-
-        # Register with LiteLLM if enabled
-        from silo.litellm.registry import register_model
-
-        register_model(
-            config.litellm, model.name, model.host, model.port, result.instance_id,
-        )

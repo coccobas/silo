@@ -261,11 +261,18 @@ class ModelsScreen(Screen):
             f"on {settings.host}:{settings.port}...",
         )
         try:
+            # Pass LiteLLM settings as env vars to the subprocess
+            extra_env: dict[str, str] = {}
+            if getattr(settings, "litellm_register", False) and getattr(settings, "litellm_url", ""):
+                extra_env["SILO_LITELLM_ENABLED"] = "true"
+                extra_env["SILO_LITELLM_URL"] = settings.litellm_url
+
             result = spawn_model(
                 name=settings.name,
                 repo_id=repo_id,
                 host=settings.host,
                 port=settings.port,
+                extra_env=extra_env or None,
             )
             pid = result.pid
 

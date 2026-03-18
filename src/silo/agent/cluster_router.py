@@ -207,21 +207,6 @@ async def cluster_spawn(
         output=req.output,
     )
     logger.info("Spawned '%s' on node '%s' (pid=%d)", req.name, node_name, pid)
-
-    # Register with LiteLLM — use the worker's actual host for the api_base
-    if hasattr(request.app.state, "litellm_config"):
-        from silo.litellm.registry import register_model
-        from silo.process.pid import read_pid_entry
-
-        worker = cluster.get_worker(node_name)
-        worker_host = worker.host if worker else req.host
-        entry = read_pid_entry(req.name)
-        if entry and entry.instance_id:
-            register_model(
-                request.app.state.litellm_config, req.name,
-                worker_host, req.port, entry.instance_id,
-            )
-
     return ClusterSpawnResponse(node=node_name, pid=pid, name=req.name)
 
 
@@ -233,11 +218,6 @@ def cluster_stop(req: ClusterStopRequest, request: Request) -> ClusterStopRespon
     """Stop a model, searching across all cluster nodes."""
     cluster = _get_cluster(request)
     head_name = _get_head_name(request)
-
-    # Read instance_id before stopping for LiteLLM deregistration
-    from silo.process.pid import read_pid_entry
-
-    entry = read_pid_entry(req.name)
 
     for worker in cluster.get_workers():
         try:
@@ -252,16 +232,6 @@ def cluster_stop(req: ClusterStopRequest, request: Request) -> ClusterStopRespon
                     stopped = client.stop(
                         req.name, grace_period=req.grace_period
                     )
-
-                    # Deregister from LiteLLM
-                    if stopped and entry and hasattr(request.app.state, "litellm_config"):
-                        from silo.litellm.registry import deregister_model
-
-                        deregister_model(
-                            request.app.state.litellm_config,
-                            req.name, entry.instance_id,
-                        )
-
                     return ClusterStopResponse(
                         node=worker.name, stopped=stopped, name=req.name
                     )

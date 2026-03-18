@@ -99,7 +99,7 @@ def create_agent_app(
 
         loop = asyncio.get_running_loop()
 
-        # Load LiteLLM config for spawn/stop hooks
+        # Load LiteLLM config for optional deregister-all on quit
         silo_config = load_config()
         app.state.litellm_config = silo_config.litellm
 
@@ -287,34 +287,13 @@ def create_agent_app(
             quantize=req.quantize,
             output=req.output,
         )
-
-        # Register with LiteLLM
-        if hasattr(app.state, "litellm_config"):
-            from silo.litellm.registry import register_model
-
-            register_model(
-                app.state.litellm_config, req.name,
-                req.host, req.port, result.instance_id,
-            )
-
         return SpawnResponse(pid=result.pid, name=req.name)
 
     @app.post("/stop", response_model=StopResponse)
     def stop(req: StopRequest) -> StopResponse:
         from silo.process.manager import stop_model
-        from silo.process.pid import read_pid_entry
 
-        # Read instance_id before stopping so we can deregister
-        entry = read_pid_entry(req.name)
         stopped = stop_model(name=req.name, grace_period=req.grace_period)
-
-        if stopped and entry and hasattr(app.state, "litellm_config"):
-            from silo.litellm.registry import deregister_model
-
-            deregister_model(
-                app.state.litellm_config, req.name, entry.instance_id,
-            )
-
         return StopResponse(stopped=stopped, name=req.name)
 
     # ── Memory ────────────────────────────────────────

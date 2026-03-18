@@ -102,6 +102,10 @@ class ServeSettings:
     warmup: bool = False
     stream_by_default: bool = False
 
+    # LiteLLM
+    litellm_register: bool = False
+    litellm_url: str = ""
+
 
 def _is_llm(runtime: str) -> bool:
     return runtime in ("mlx", "llamacpp")
@@ -144,6 +148,18 @@ class ServeModal(ModalScreen[ServeSettings | None]):
         self._default_port = default_port
         self._model_format = model_format
         self._saved = saved or {}
+
+        # Load LiteLLM defaults from config
+        self._default_litellm_enabled = False
+        self._default_litellm_url = ""
+        try:
+            from silo.config.loader import load_config
+
+            config = load_config()
+            self._default_litellm_enabled = config.litellm.enabled
+            self._default_litellm_url = config.litellm.url
+        except Exception:
+            pass
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -358,6 +374,25 @@ class ServeModal(ModalScreen[ServeSettings | None]):
                         value=s("stream_by_default", False),
                     )
 
+                # ── LiteLLM ──
+                yield Static(
+                    "[b dim]LiteLLM Proxy[/]", classes="serve-section"
+                )
+                with Horizontal(classes="form-row"):
+                    yield Label("")
+                    yield Checkbox(
+                        "Register with LiteLLM",
+                        id="serve-litellm-register",
+                        value=s("litellm_register", self._default_litellm_enabled),
+                    )
+                with Horizontal(classes="form-row", id="litellm-url-row"):
+                    yield Label("URL:")
+                    yield Input(
+                        value=s("litellm_url", self._default_litellm_url),
+                        placeholder="e.g. 100.112.188.75 or http://10.0.0.1:4000",
+                        id="serve-litellm-url",
+                    )
+
             yield Static(
                 "[dim]Tab: next field  Enter: open select / submit  Esc: cancel[/]",
                 classes="serve-hint",
@@ -469,6 +504,16 @@ class ServeModal(ModalScreen[ServeSettings | None]):
         tts_fmt = str(self.query_one("#serve-tts-format", Select).value)
         tts_speed = self._float("serve-tts-speed", 1.0)
 
+        litellm_register = self.query_one("#serve-litellm-register", Checkbox).value
+        litellm_url_raw = self.query_one("#serve-litellm-url", Input).value.strip()
+
+        # Smart URL normalization — add :4000 if no port provided
+        litellm_url = ""
+        if litellm_url_raw:
+            from silo.litellm.registry import normalize_litellm_url
+
+            litellm_url = normalize_litellm_url(litellm_url_raw)
+
         return ServeSettings(
             name=name,
             host=host,
@@ -493,6 +538,8 @@ class ServeModal(ModalScreen[ServeSettings | None]):
             tts_speed=tts_speed,
             warmup=self.query_one("#serve-warmup", Checkbox).value,
             stream_by_default=self.query_one("#serve-stream-default", Checkbox).value,
+            litellm_register=litellm_register,
+            litellm_url=litellm_url,
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

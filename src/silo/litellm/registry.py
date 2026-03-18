@@ -7,11 +7,42 @@ never raise, so LiteLLM downtime cannot block Silo operations.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 
 from silo.config.models import LitellmConfig
 from silo.litellm.client import LitellmClient
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_LITELLM_PORT = 4000
+
+
+def normalize_litellm_url(url: str) -> str:
+    """Normalize a LiteLLM URL, adding scheme and default port if missing.
+
+    Examples:
+        "100.112.188.75"       -> "http://100.112.188.75:4000"
+        "100.112.188.75:5000"  -> "http://100.112.188.75:5000"
+        "http://10.0.0.1"      -> "http://10.0.0.1:4000"
+        "http://10.0.0.1:4000" -> "http://10.0.0.1:4000"
+    """
+    raw = url.strip().rstrip("/")
+    if not raw:
+        return ""
+
+    # Add scheme if missing
+    if not raw.startswith(("http://", "https://")):
+        raw = f"http://{raw}"
+
+    parsed = urlparse(raw)
+    host = parsed.hostname or ""
+    port = parsed.port
+    scheme = parsed.scheme or "http"
+
+    if not port:
+        port = _DEFAULT_LITELLM_PORT
+
+    return f"{scheme}://{host}:{port}"
 
 
 def resolve_api_base(host: str, port: int) -> str:
