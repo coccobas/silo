@@ -18,6 +18,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+def _resolve_serve_host(request: Request, state) -> str:
+    """Get this server's externally-reachable host.
+
+    Uses the Host header from the request (the address the caller
+    used to reach us), stripping the port. Falls back to state.host.
+    """
+    host_header = request.headers.get("host", "")
+    if host_header:
+        # Strip port if present (e.g., "100.112.188.75:8801" -> "100.112.188.75")
+        host = host_header.split(":")[0]
+        if host and host not in ("127.0.0.1", "localhost", "::1"):
+            return host
+    if state.host and state.host not in ("0.0.0.0", "127.0.0.1", "localhost", "::1"):
+        return state.host
+    return "127.0.0.1"
+
+
 def _litellm_status(request: Request) -> LitellmStatusResponse:
     """Build a LiteLLM status response from current state."""
     state = request.app.state.litellm_state
@@ -64,17 +81,15 @@ def litellm_register(
         old_client = LitellmClient(state.url, state.api_key)
         old_client.delete(state.instance_id)
 
-    # Build api_base from the server's own host:port
-    # Use the request's client host (how the caller reached us) for
-    # externally-reachable address, falling back to state.host
-    client_host = request.client.host if request.client else state.host
-    serve_host = client_host if client_host not in ("127.0.0.1", "::1") else state.host
+    # Build api_base from the Host header (how the caller addressed us)
+    # This gives us the externally-reachable host for this server
+    serve_host = _resolve_serve_host(request, state)
     api_base = f"http://{serve_host}:{state.port}/v1"
 
-    client.register(new_name, api_base, state.instance_id)
+    ok = client.register(new_name, api_base, state.instance_id)
 
     # Update live state
-    state.registered = True
+    state.registered = ok
     state.url = url
     state.api_key = api_key
     state.model_name = new_name
@@ -117,8 +132,7 @@ def update_model_name(
         client = LitellmClient(state.url, state.api_key)
         client.delete(state.instance_id)
 
-        client_host = request.client.host if request.client else state.host
-        serve_host = client_host if client_host not in ("127.0.0.1", "::1") else state.host
+        serve_host = _resolve_serve_host(request, state)
         api_base = f"http://{serve_host}:{state.port}/v1"
         client.register(req.model_name, api_base, state.instance_id)
 
