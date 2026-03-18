@@ -95,7 +95,14 @@ def create_agent_app(
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         import asyncio
 
+        from silo.config.loader import load_config
+
         loop = asyncio.get_running_loop()
+
+        # Load LiteLLM config for spawn/stop hooks
+        silo_config = load_config()
+        app.state.litellm_config = silo_config.litellm
+
         advertiser = None
         if node_name is not None:
             try:
@@ -177,6 +184,14 @@ def create_agent_app(
         # Shutdown
         if head and hasattr(app.state, "health_checker"):
             await app.state.health_checker.stop()
+
+        # Optionally deregister all models from LiteLLM on quit
+        if hasattr(app.state, "litellm_config") and app.state.litellm_config.deregister_on_quit:
+            from silo.litellm.registry import deregister_all
+
+            local_ip = _detect_local_ip()
+            deregister_all(app.state.litellm_config, api_base_prefix=f"http://{local_ip}")
+
         if advertiser is not None:
             advertiser.__exit__(None, None, None)
 
@@ -264,7 +279,7 @@ def create_agent_app(
     def spawn(req: SpawnRequest) -> SpawnResponse:
         from silo.process.manager import spawn_model
 
-        pid = spawn_model(
+        result = spawn_model(
             name=req.name,
             repo_id=req.repo_id,
             host=req.host,
@@ -272,13 +287,34 @@ def create_agent_app(
             quantize=req.quantize,
             output=req.output,
         )
-        return SpawnResponse(pid=pid, name=req.name)
+
+        # Register with LiteLLM
+        if hasattr(app.state, "litellm_config"):
+            from silo.litellm.registry import register_model
+
+            register_model(
+                app.state.litellm_config, req.name,
+                req.host, req.port, result.instance_id,
+            )
+
+        return SpawnResponse(pid=result.pid, name=req.name)
 
     @app.post("/stop", response_model=StopResponse)
     def stop(req: StopRequest) -> StopResponse:
         from silo.process.manager import stop_model
+        from silo.process.pid import read_pid_entry
 
+        # Read instance_id before stopping so we can deregister
+        entry = read_pid_entry(req.name)
         stopped = stop_model(name=req.name, grace_period=req.grace_period)
+
+        if stopped and entry and hasattr(app.state, "litellm_config"):
+            from silo.litellm.registry import deregister_model
+
+            deregister_model(
+                app.state.litellm_config, req.name, entry.instance_id,
+            )
+
         return StopResponse(stopped=stopped, name=req.name)
 
     # ── Memory ────────────────────────────────────────

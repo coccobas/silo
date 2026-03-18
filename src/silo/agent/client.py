@@ -124,7 +124,7 @@ class LocalClient:
     ) -> int:
         from silo.process.manager import spawn_model
 
-        return spawn_model(
+        result = spawn_model(
             name=name,
             repo_id=repo_id,
             host=host,
@@ -132,6 +132,7 @@ class LocalClient:
             quantize=quantize,
             output=output,
         )
+        return result.pid
 
     def stop(self, name: str, grace_period: int = 30) -> bool:
         from silo.process.manager import stop_model

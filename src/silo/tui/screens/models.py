@@ -261,12 +261,13 @@ class ModelsScreen(Screen):
             f"on {settings.host}:{settings.port}...",
         )
         try:
-            pid = spawn_model(
+            result = spawn_model(
                 name=settings.name,
                 repo_id=repo_id,
                 host=settings.host,
                 port=settings.port,
             )
+            pid = result.pid
 
             # Wait briefly and check if process is still alive
             time.sleep(2)

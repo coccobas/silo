@@ -16,9 +16,18 @@ from silo.process.pid import (
     list_pid_entries,
     list_pids,
     read_pid,
+    read_pid_entry,
     remove_pid,
     write_pid,
 )
+
+
+@dataclass(frozen=True)
+class SpawnResult:
+    """Result of spawning a model process."""
+
+    pid: int
+    instance_id: str
 
 
 @dataclass(frozen=True)
@@ -30,6 +39,7 @@ class ProcessInfo:
     port: int
     repo_id: str
     status: str  # "running", "stopped", "unknown"
+    instance_id: str = ""
 
 
 def spawn_model(
@@ -41,7 +51,7 @@ def spawn_model(
     output: str | None = None,
     pids_dir: Path | None = None,
     logs_dir: Path | None = None,
-) -> int:
+) -> SpawnResult:
     """Spawn a `silo serve` subprocess for a model.
 
     Args:
@@ -55,13 +65,16 @@ def spawn_model(
         logs_dir: Override logs directory.
 
     Returns:
-        PID of the spawned process.
+        SpawnResult with PID and instance_id.
     """
+    import uuid
+
     ensure_dirs()
     target_logs = logs_dir or LOGS_DIR
     target_logs.mkdir(parents=True, exist_ok=True)
 
     log_file = target_logs / f"{name}.log"
+    instance_id = str(uuid.uuid4())
 
     # Use the installed entry point (same venv as current process)
     entry_point = Path(sys.executable).parent / "silo"
@@ -91,9 +104,10 @@ def spawn_model(
         port=port,
         host=host,
         repo_id=repo_id,
+        instance_id=instance_id,
         pids_dir=pids_dir,
     )
-    return proc.pid
+    return SpawnResult(pid=proc.pid, instance_id=instance_id)
 
 
 def stop_model(
@@ -164,12 +178,16 @@ def get_status(
     Returns:
         ProcessInfo with current status.
     """
-    pid = read_pid(name, pids_dir=pids_dir)
-    if pid is None:
+    entry = read_pid_entry(name, pids_dir=pids_dir)
+    if entry is None:
         return ProcessInfo(name=name, pid=0, port=port, repo_id=repo_id, status="stopped")
 
-    if is_running(pid):
-        return ProcessInfo(name=name, pid=pid, port=port, repo_id=repo_id, status="running")
+    if is_running(entry.pid):
+        return ProcessInfo(
+            name=name, pid=entry.pid, port=entry.port or port,
+            repo_id=entry.repo_id or repo_id, status="running",
+            instance_id=entry.instance_id,
+        )
 
     # Stale PID file
     remove_pid(name, pids_dir=pids_dir)
@@ -195,6 +213,7 @@ def list_running(pids_dir: Path | None = None) -> list[ProcessInfo]:
                 port=entry.port,
                 repo_id=entry.repo_id,
                 status=status,
+                instance_id=entry.instance_id,
             )
         )
     return result

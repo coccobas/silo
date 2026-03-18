@@ -40,7 +40,7 @@ def up(
         console.print(
             f"[green]Starting {model.name} ({model.repo}) on port {model.port}...[/green]"
         )
-        pid = spawn_model(
+        result = spawn_model(
             name=model.name,
             repo_id=model.repo,
             host=model.host,
@@ -48,4 +48,11 @@ def up(
             quantize=model.quantize,
             output=model.output,
         )
-        console.print(f"[dim]  PID {pid}[/dim]")
+        console.print(f"[dim]  PID {result.pid}[/dim]")
+
+        # Register with LiteLLM if enabled
+        from silo.litellm.registry import register_model
+
+        register_model(
+            config.litellm, model.name, model.host, model.port, result.instance_id,
+        )

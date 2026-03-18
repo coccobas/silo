@@ -24,6 +24,7 @@ class PidEntry:
     host: str = "127.0.0.1"
     repo_id: str = ""
     runtime: str = ""
+    instance_id: str = ""
 
 
 def write_pid(
@@ -34,18 +35,27 @@ def write_pid(
     host: str = "127.0.0.1",
     repo_id: str = "",
     runtime: str = "",
+    instance_id: str = "",
     pids_dir: Path | None = None,
 ) -> Path:
     """Write a PID manifest for a named model process.
 
+    Auto-generates an instance_id (UUID4) if not provided.
+
     Returns:
         Path to the PID file.
     """
+    import uuid
+
     target_dir = pids_dir or PIDS_DIR
     ensure_dirs()
     target_dir.mkdir(parents=True, exist_ok=True)
     pid_file = target_dir / f"{name}.pid"
-    entry = PidEntry(pid=pid, port=port, host=host, repo_id=repo_id, runtime=runtime)
+    iid = instance_id or str(uuid.uuid4())
+    entry = PidEntry(
+        pid=pid, port=port, host=host, repo_id=repo_id,
+        runtime=runtime, instance_id=iid,
+    )
     pid_file.write_text(json.dumps(asdict(entry)))
     return pid_file
 

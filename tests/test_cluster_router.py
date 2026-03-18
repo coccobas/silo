@@ -50,8 +50,11 @@ def _mock_deps(monkeypatch):
     monkeypatch.setattr(
         "silo.process.manager.list_running", lambda **kw: [FakeProc()]
     )
+    from silo.process.manager import SpawnResult
+
     monkeypatch.setattr(
-        "silo.process.manager.spawn_model", lambda **kw: 5678
+        "silo.process.manager.spawn_model",
+        lambda **kw: SpawnResult(pid=5678, instance_id="test-uuid"),
     )
     monkeypatch.setattr(
         "silo.process.manager.stop_model", lambda **kw: True

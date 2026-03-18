@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
-from silo.process.manager import ProcessInfo, get_status, list_running, spawn_model, stop_model
+from silo.process.manager import ProcessInfo, SpawnResult, get_status, list_running, spawn_model, stop_model
 from silo.process.pid import read_pid, write_pid
 
 
@@ -20,12 +20,13 @@ class TestSpawnModel:
         mock_proc.pid = 42
 
         with patch("silo.process.manager.subprocess.Popen", return_value=mock_proc):
-            pid = spawn_model(
+            result = spawn_model(
                 "test-model", "org/model",
                 pids_dir=pids_dir, logs_dir=logs_dir,
             )
 
-        assert pid == 42
+        assert result.pid == 42
+        assert result.instance_id  # UUID was generated
         assert read_pid("test-model", pids_dir=pids_dir) == 42
 
     def test_spawn_with_options(self, tmp_path):

@@ -41,6 +41,17 @@ class ModelConfig(BaseModel):
     node: str | None = None
 
 
+class LitellmConfig(BaseModel):
+    """Configuration for LiteLLM proxy integration."""
+
+    model_config = {"frozen": True}
+
+    enabled: bool = False
+    url: str = ""
+    api_key: str = ""
+    deregister_on_quit: bool = False
+
+
 class AppConfig(BaseModel):
     """Top-level application configuration."""
 
@@ -48,3 +59,4 @@ class AppConfig(BaseModel):
 
     nodes: list[NodeConfig] = Field(default_factory=list)
     models: list[ModelConfig] = Field(default_factory=list)
+    litellm: LitellmConfig = Field(default_factory=LitellmConfig)

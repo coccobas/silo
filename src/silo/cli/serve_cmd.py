@@ -116,4 +116,17 @@ def serve(
         f"[dim]{endpoint_lines}[/dim]"
     )
 
-    uvicorn.run(server_app, host=host, port=port, log_level="warning")
+    # Register with LiteLLM if configured
+    import uuid
+
+    from silo.config.loader import load_config
+    from silo.litellm.registry import deregister_model, register_model
+
+    config = load_config()
+    instance_id = str(uuid.uuid4())
+    register_model(config.litellm, model_name, host, port, instance_id)
+
+    try:
+        uvicorn.run(server_app, host=host, port=port, log_level="warning")
+    finally:
+        deregister_model(config.litellm, model_name, instance_id)
