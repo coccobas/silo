@@ -52,6 +52,9 @@ def create_app(
     backend: Any,
     model_name: str,
     litellm: LitellmRegistration | None = None,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8800,
 ) -> FastAPI:
     """Create a FastAPI app for serving a single model.
 
@@ -65,6 +68,8 @@ def create_app(
         backend: A backend instance implementing one or more Backend protocols.
         model_name: Friendly name for the model.
         litellm: Optional LiteLLM registration info.
+        host: Server bind host (used for admin API awareness).
+        port: Server bind port (used for admin API awareness).
 
     Returns:
         Configured FastAPI application.
@@ -102,12 +107,12 @@ def create_app(
             )
             deregister_model(config, state.model_name, state.instance_id)
 
-    # Initialize mutable LiteLLM state
+    # Initialize mutable LiteLLM state — always knows its own bind address
     litellm_state = LitellmState(
         model_name=model_name,
         instance_id=instance_id,
-        host=litellm.host if litellm else "",
-        port=litellm.port if litellm else 0,
+        host=host,
+        port=port,
     )
 
     app = FastAPI(

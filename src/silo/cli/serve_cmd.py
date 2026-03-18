@@ -107,7 +107,7 @@ def serve(
         config=config.litellm, host=host, port=port,
     ) if config.litellm.enabled else None
 
-    server_app = create_app(backend, model_name, litellm=litellm_reg)
+    server_app = create_app(backend, model_name, litellm=litellm_reg, host=host, port=port)
 
     # Show appropriate endpoints based on model type
     endpoints = ["GET  /v1/models", "GET  /health"]
