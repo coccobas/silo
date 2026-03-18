@@ -105,7 +105,17 @@ def _start_agent_daemon(
 
     mode = "head" if head else "worker"
 
-    # Check if port is already in use
+    # Singleton guard — check lock file first, then port
+    from silo.config.paths import read_agent_lock
+
+    existing = read_agent_lock()
+    if existing:
+        console.print(
+            f"[red]Another agent is already running (PID {existing['pid']}, "
+            f"port {existing['port']}). Stop it first or use --head-url.[/red]"
+        )
+        raise typer.Exit(1)
+
     try:
         s = socket.create_connection(("127.0.0.1", agent_port), timeout=0.5)
         s.close()
@@ -117,8 +127,17 @@ def _start_agent_daemon(
     except (ConnectionRefusedError, OSError):
         pass  # Port is free — good
 
+    import os
+
+    from silo.config.paths import acquire_agent_lock, release_agent_lock
+
     node_name = name or plat.node()
     ensure_dirs()
+
+    if not acquire_agent_lock(os.getpid(), agent_port):
+        console.print("[red]Could not acquire agent lock.[/red]")
+        raise typer.Exit(1)
+
     agent_instance = create_agent_app(
         node_name=node_name, port=agent_port, head=head
     )
@@ -132,6 +151,8 @@ def _start_agent_daemon(
             server.run()
         except BaseException as exc:
             startup_error.append(exc)
+        finally:
+            release_agent_lock()
 
     thread = threading.Thread(
         target=_run_server, daemon=True, name=f"agent-{mode}"

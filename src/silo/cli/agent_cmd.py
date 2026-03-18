@@ -36,6 +36,8 @@ def start(
     ),
 ) -> None:
     """Start the Silo agent daemon for remote management."""
+    import os
+
     try:
         import uvicorn
     except ImportError:
@@ -43,16 +45,34 @@ def start(
         raise typer.Exit(1) from None
 
     from silo.agent.daemon import create_agent_app
-    from silo.config.paths import ensure_dirs
+    from silo.config.paths import acquire_agent_lock, read_agent_lock, release_agent_lock, ensure_dirs
+
+    ensure_dirs()
+
+    # Singleton guard — only one agent per machine
+    existing = read_agent_lock()
+    if existing:
+        typer.echo(
+            f"Another agent is already running (PID {existing['pid']}, "
+            f"port {existing['port']}). Stop it first or use that instance.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    if not acquire_agent_lock(os.getpid(), port):
+        typer.echo("Could not acquire agent lock.", err=True)
+        raise typer.Exit(1)
 
     node_name = name or platform.node()
-    ensure_dirs()
     agent_app_instance = create_agent_app(
         node_name=node_name, port=port, head=head
     )
     mode = "head" if head else "worker"
     typer.echo(f"Silo agent '{node_name}' ({mode}) listening on {host}:{port}")
-    uvicorn.run(agent_app_instance, host=host, port=port)
+    try:
+        uvicorn.run(agent_app_instance, host=host, port=port)
+    finally:
+        release_agent_lock()
 
 
 @agent_app.command("discover")
