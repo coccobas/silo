@@ -49,15 +49,31 @@ def start(
 
     ensure_dirs()
 
-    # Singleton guard — only one agent per machine
+    # Singleton guard — reuse existing agent if already running
     existing = read_agent_lock()
     if existing:
+        existing_port = existing["port"]
         typer.echo(
-            f"Another agent is already running (PID {existing['pid']}, "
-            f"port {existing['port']}). Stop it first or use that instance.",
-            err=True,
+            f"Agent already running (PID {existing['pid']}, port {existing_port}). "
+            f"Connecting to existing instance..."
         )
-        raise typer.Exit(1)
+        # Verify it's actually reachable
+        import json
+        import urllib.request
+
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{existing_port}/health", timeout=3
+            ) as resp:
+                data = json.loads(resp.read())
+            typer.echo(
+                f"Agent is healthy: {data.get('hostname', '?')} "
+                f"v{data.get('version', '?')} on port {existing_port}"
+            )
+            raise typer.Exit(0)
+        except (urllib.error.URLError, OSError):
+            typer.echo("Existing agent is not responding. Taking over...")
+            release_agent_lock()
 
     if not acquire_agent_lock(os.getpid(), port):
         typer.echo("Could not acquire agent lock.", err=True)

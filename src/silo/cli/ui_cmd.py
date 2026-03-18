@@ -46,12 +46,23 @@ def ui(
         raise typer.Exit(1)
 
     if head or worker:
-        _start_agent_daemon(
-            agent_host=agent_host,
-            agent_port=agent_port,
-            name=name,
-            head=head,
-        )
+        # Reuse existing agent if already running
+        from silo.config.paths import read_agent_lock
+
+        existing = read_agent_lock()
+        if existing:
+            console.print(
+                f"[dim]Reusing existing agent (PID {existing['pid']}, "
+                f"port {existing['port']})[/dim]"
+            )
+            agent_port = existing["port"]
+        else:
+            _start_agent_daemon(
+                agent_host=agent_host,
+                agent_port=agent_port,
+                name=name,
+                head=head,
+            )
 
     tui_app = create_tui_app()
     if head:
