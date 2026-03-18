@@ -22,6 +22,8 @@ from silo.agent.schemas import (
     StopRequest,
     StopResponse,
     SystemStatsResponse,
+    UpdateRequest,
+    UpdateResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -295,6 +297,96 @@ def create_agent_app(
 
         stopped = stop_model(name=req.name, grace_period=req.grace_period)
         return StopResponse(stopped=stopped, name=req.name)
+
+    # ── Update ─────────────────────────────────────
+
+    @app.patch("/update", response_model=UpdateResponse)
+    def update(req: UpdateRequest) -> UpdateResponse:
+        """Update a running model server (hot or cold changes)."""
+        import json
+        import urllib.error
+        import urllib.request
+
+        from silo.process.pid import read_pid_entry
+
+        entry = read_pid_entry(req.name)
+        if entry is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"Model '{req.name}' not found")
+
+        changes: list[str] = []
+        server_url = f"http://{entry.host}:{entry.port}"
+
+        def _admin_post(path: str, data: dict) -> dict | None:
+            body = json.dumps(data).encode()
+            r = urllib.request.Request(
+                f"{server_url}{path}",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(r, timeout=5) as resp:
+                    return json.loads(resp.read())
+            except Exception:
+                logger.warning("Admin call to %s%s failed", server_url, path, exc_info=True)
+                return None
+
+        def _admin_put(path: str, data: dict) -> dict | None:
+            body = json.dumps(data).encode()
+            r = urllib.request.Request(
+                f"{server_url}{path}",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="PUT",
+            )
+            try:
+                with urllib.request.urlopen(r, timeout=5) as resp:
+                    return json.loads(resp.read())
+            except Exception:
+                logger.warning("Admin call to %s%s failed", server_url, path, exc_info=True)
+                return None
+
+        # Hot changes via admin API
+        if req.litellm_enabled is True and req.litellm_url:
+            from silo.litellm.registry import normalize_litellm_url
+
+            data = {"url": normalize_litellm_url(req.litellm_url)}
+            if req.litellm_api_key:
+                data["api_key"] = req.litellm_api_key
+            if req.litellm_model_name:
+                data["model_name"] = req.litellm_model_name
+            result = _admin_post("/admin/litellm/register", data)
+            if result:
+                changes.append("litellm_registered")
+
+        elif req.litellm_enabled is False:
+            result = _admin_post("/admin/litellm/deregister", {})
+            if result:
+                changes.append("litellm_deregistered")
+
+        if req.model_name:
+            result = _admin_put("/admin/model-name", {"model_name": req.model_name})
+            if result:
+                changes.append(f"model_name={req.model_name}")
+
+        # Cold changes — require restart
+        restarted = False
+        if req.port and req.port != entry.port:
+            from silo.process.manager import spawn_model, stop_model
+
+            stop_model(req.name)
+            spawn_model(
+                name=req.name,
+                repo_id=entry.repo_id,
+                host=entry.host,
+                port=req.port,
+            )
+            changes.append(f"port={req.port}")
+            restarted = True
+
+        return UpdateResponse(name=req.name, restarted=restarted, changes=changes)
 
     # ── Memory ────────────────────────────────────────
 

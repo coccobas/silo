@@ -139,6 +139,53 @@ class LocalClient:
 
         return stop_model(name=name, grace_period=grace_period)
 
+    def update(self, name: str, **kwargs) -> dict:
+        """Update a running model server via the local daemon endpoint."""
+        import json
+        import urllib.request
+
+        from silo.process.pid import read_pid_entry
+
+        entry = read_pid_entry(name)
+        if entry is None:
+            return {"name": name, "restarted": False, "changes": []}
+
+        server_url = f"http://{entry.host}:{entry.port}"
+
+        def _post(path, data):
+            body = json.dumps(data).encode()
+            req = urllib.request.Request(
+                f"{server_url}{path}",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST" if "litellm" in path else "PUT",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return json.loads(resp.read())
+
+        changes: list[str] = []
+
+        if kwargs.get("litellm_enabled") is True and kwargs.get("litellm_url"):
+            from silo.litellm.registry import normalize_litellm_url
+
+            data: dict[str, str] = {"url": normalize_litellm_url(kwargs["litellm_url"])}
+            if kwargs.get("litellm_api_key"):
+                data["api_key"] = kwargs["litellm_api_key"]
+            if kwargs.get("litellm_model_name"):
+                data["model_name"] = kwargs["litellm_model_name"]
+            _post("/admin/litellm/register", data)
+            changes.append("litellm_registered")
+
+        elif kwargs.get("litellm_enabled") is False:
+            _post("/admin/litellm/deregister", {})
+            changes.append("litellm_deregistered")
+
+        if kwargs.get("model_name"):
+            _post("/admin/model-name", {"model_name": kwargs["model_name"]})
+            changes.append(f"model_name={kwargs['model_name']}")
+
+        return {"name": name, "restarted": False, "changes": changes}
+
     def memory(self) -> NodeMemory:
         from silo.process.memory import get_memory_info
 
@@ -305,6 +352,22 @@ class RemoteClient:
             "/stop", {"name": name, "grace_period": grace_period}
         )
         return data["stopped"]
+
+    def update(self, name: str, **kwargs) -> dict:
+        """Update a running model server on a remote node."""
+        import json
+        import urllib.request
+
+        url = f"{self._base}/update"
+        payload = {"name": name, **kwargs}
+        body = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            url, data=body,
+            headers={"Content-Type": "application/json"},
+            method="PATCH",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
 
     def memory(self) -> NodeMemory:
         data = self._get("/memory")

@@ -106,3 +106,23 @@ class DownloadResponse(BaseModel):
 
     repo_id: str
     local_path: str
+
+
+class UpdateRequest(BaseModel):
+    """Request to update a running model server."""
+
+    name: str
+    litellm_enabled: bool | None = None
+    litellm_url: str | None = None
+    litellm_api_key: str | None = None
+    litellm_model_name: str | None = None
+    model_name: str | None = None
+    port: int | None = None
+
+
+class UpdateResponse(BaseModel):
+    """Response after updating a model server."""
+
+    name: str
+    restarted: bool
+    changes: list[str]

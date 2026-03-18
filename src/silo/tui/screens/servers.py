@@ -22,6 +22,7 @@ class ServersScreen(Screen):
     BINDINGS = [
         ("r", "refresh", "Refresh"),
         ("enter", "toggle", "Toggle Up/Down"),
+        ("e", "edit_selected", "Edit"),
         ("u", "up_selected", "Up Selected"),
         ("d", "down_selected", "Down Selected"),
         ("U", "up_all", "Up All"),
@@ -327,6 +328,168 @@ class ServersScreen(Screen):
             self.app.call_from_thread(
                 self.notify, f"Failed to stop {name}: {exc}", severity="error"
             )
+        self.app.call_from_thread(self.action_refresh)
+
+    def action_edit_selected(self) -> None:
+        """Open the edit modal for the selected running server."""
+        selected = self._get_selected()
+        if not selected:
+            return
+        node_name, name = selected
+        self._open_edit_modal(node_name, name)
+
+    @work(thread=True)
+    def _open_edit_modal(self, node_name: str, name: str) -> None:
+        """Fetch server info and open the edit modal."""
+        import json
+        import urllib.request
+
+        from silo.process.pid import read_pid_entry
+
+        entry = read_pid_entry(name)
+        if entry is None:
+            self.app.call_from_thread(
+                self.notify, f"'{name}' is not running", severity="warning"
+            )
+            return
+
+        # Try to get current state from the admin API
+        current_model_name = name
+        litellm_registered = False
+        litellm_url = ""
+        litellm_api_key = ""
+
+        try:
+            server_url = f"http://{entry.host}:{entry.port}"
+            req = urllib.request.Request(f"{server_url}/admin/info")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                info = json.loads(resp.read())
+                current_model_name = info.get("model_name", name)
+                ll = info.get("litellm", {})
+                litellm_registered = ll.get("registered", False)
+                litellm_url = ll.get("url", "")
+        except Exception:
+            pass
+
+        # Fall back to config for API key
+        if not litellm_api_key:
+            try:
+                from silo.config.loader import load_config
+
+                config = load_config()
+                litellm_api_key = config.litellm.api_key
+                if not litellm_url:
+                    litellm_url = config.litellm.url
+            except Exception:
+                pass
+
+        from silo.tui.widgets.edit_server_modal import EditServerModal
+
+        def on_edit(result) -> None:
+            if result is not None:
+                self._do_update(node_name, name, entry.port, result)
+
+        self.app.call_from_thread(
+            self.app.push_screen,
+            EditServerModal(
+                name=name,
+                current_model_name=current_model_name,
+                current_port=entry.port,
+                litellm_registered=litellm_registered,
+                litellm_url=litellm_url,
+                litellm_api_key=litellm_api_key,
+            ),
+            on_edit,
+        )
+
+    @work(thread=True)
+    def _do_update(self, node_name: str, name: str, current_port: int, update) -> None:
+        """Apply changes from the edit modal to the running server."""
+        import json
+        import urllib.request
+
+        from silo.process.pid import read_pid_entry
+
+        entry = read_pid_entry(name)
+        if entry is None:
+            self.app.call_from_thread(
+                self.notify, f"'{name}' is not running", severity="error"
+            )
+            return
+
+        server_url = f"http://{entry.host}:{entry.port}"
+        changes: list[str] = []
+
+        try:
+            # LiteLLM changes
+            if update.litellm_enabled is True:
+                from silo.litellm.registry import normalize_litellm_url
+
+                data: dict[str, str] = {"url": normalize_litellm_url(update.litellm_url)}
+                if update.litellm_api_key:
+                    data["api_key"] = update.litellm_api_key
+                body = json.dumps(data).encode()
+                req = urllib.request.Request(
+                    f"{server_url}/admin/litellm/register",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    json.loads(resp.read())
+                changes.append("LiteLLM registered")
+
+            elif update.litellm_enabled is False:
+                body = json.dumps({}).encode()
+                req = urllib.request.Request(
+                    f"{server_url}/admin/litellm/deregister",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    json.loads(resp.read())
+                changes.append("LiteLLM deregistered")
+
+            # Model name change
+            if update.model_name:
+                body = json.dumps({"model_name": update.model_name}).encode()
+                req = urllib.request.Request(
+                    f"{server_url}/admin/model-name",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="PUT",
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    json.loads(resp.read())
+                changes.append(f"renamed to '{update.model_name}'")
+
+            # Port change (cold restart)
+            if update.port:
+                from silo.process.manager import spawn_model, stop_model
+
+                stop_model(name)
+                spawn_model(
+                    name=name,
+                    repo_id=entry.repo_id,
+                    host=entry.host,
+                    port=update.port,
+                )
+                changes.append(f"restarted on port {update.port}")
+
+            if changes:
+                msg = f"Updated {name}: {', '.join(changes)}"
+                self.app.call_from_thread(self.notify, msg)
+            else:
+                self.app.call_from_thread(
+                    self.notify, "No changes applied", severity="warning"
+                )
+
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.notify, f"Update failed: {exc}", severity="error"
+            )
+
         self.app.call_from_thread(self.action_refresh)
 
     def _poll_status(self) -> None:

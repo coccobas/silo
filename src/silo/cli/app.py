@@ -50,6 +50,7 @@ def main() -> None:
         setup_cmd,
         ui_cmd,
         up_cmd,
+        update_cmd,
         wake_cmd,
     )
 
