@@ -49,6 +49,7 @@ class LitellmConfig(BaseModel):
     enabled: bool = False
     url: str = ""
     api_key: str = ""
+    advertise_host: str = ""
     deregister_on_quit: bool = False
 
 

@@ -16,6 +16,7 @@ class ClusterScreen(Screen):
 
     BINDINGS = [
         ("r", "refresh", "Refresh"),
+        ("e", "edit_model", "Edit"),
         ("g", "register", "Register"),
         ("s", "spawn", "Spawn"),
         ("x", "stop_model", "Stop"),
@@ -25,7 +26,9 @@ class ClusterScreen(Screen):
 
     # Cache worker names for modals
     _worker_names: list[str] = []
-    # Cache model names for stop
+    # Cache model entries: (name, worker_host, model_port)
+    _model_entries: list[tuple[str, str, int]] = []
+    # Cache model names for stop (derived from _model_entries)
     _model_names: list[str] = []
 
     def compose(self) -> ComposeResult:
@@ -36,7 +39,7 @@ class ClusterScreen(Screen):
         yield Static(" [b]Models (cluster-wide)[/b]", classes="section-title")
         yield DataTable(id="cluster-models-table")
         yield Static(
-            " [dim]r[/] refresh  [dim]g[/] register  "
+            " [dim]r[/] refresh  [dim]e[/] edit  [dim]g[/] register  "
             "[dim]s[/] spawn  [dim]x[/] stop  [dim]d[/] download  "
             "[dim]del[/] remove",
             classes="hint-bar",
@@ -93,6 +96,7 @@ class ClusterScreen(Screen):
         model_rows: list[tuple[str, str, str, str, str, str]] = []
         worker_names: list[str] = []
         model_names: list[str] = []
+        model_entries: list[tuple[str, str, int]] = []
         total_running = 0
         total_available = 0.0
         total_memory = 0.0
@@ -163,6 +167,11 @@ class ClusterScreen(Screen):
                 proc_status = proc.get("status", "unknown")
                 proc_color = "green" if proc_status == "running" else "dim"
                 model_names.append(proc["name"])
+                model_entries.append((
+                    proc["name"],
+                    w.get("host", ""),
+                    int(proc.get("port", 0)),
+                ))
                 model_rows.append((
                     f"[{proc_color}]{w['name']}[/]",
                     f"[{proc_color}]{proc['name']}[/]",
@@ -187,6 +196,7 @@ class ClusterScreen(Screen):
             mem_pct,
             worker_names,
             model_names,
+            model_entries,
         )
 
     def _apply_data(
@@ -198,9 +208,11 @@ class ClusterScreen(Screen):
         mem_pct: float,
         worker_names: list[str],
         model_names: list[str],
+        model_entries: list[tuple[str, str, int]] | None = None,
     ) -> None:
         self._worker_names = worker_names
         self._model_names = model_names
+        self._model_entries = model_entries or []
 
         counts = self.query_one(StatusCounts)
         counts.running = running_count
@@ -509,6 +521,152 @@ class ClusterScreen(Screen):
                 self.notify,
                 f"Remove failed: {exc}",
                 severity="error",
+            )
+
+        self._load_data()
+
+    # ── Edit ───────────────────────────────────────────
+
+    def action_edit_model(self) -> None:
+        """Edit the selected model from the cluster models table."""
+        models_t = self.query_one("#cluster-models-table", DataTable)
+        if models_t.cursor_row is None or models_t.row_count == 0:
+            return
+        if not self._model_entries:
+            return
+
+        row_idx = models_t.cursor_row
+        if row_idx >= len(self._model_entries):
+            return
+
+        name, worker_host, model_port = self._model_entries[row_idx]
+        if not worker_host or not model_port:
+            self.notify("Cannot determine server address", severity="warning")
+            return
+
+        self._open_cluster_edit(name, worker_host, model_port)
+
+    @work(thread=True)
+    def _open_cluster_edit(self, name: str, worker_host: str, model_port: int) -> None:
+        """Fetch admin info from the model server and open the edit modal."""
+        import json
+        import urllib.request
+
+        server_url = f"http://{worker_host}:{model_port}"
+
+        current_model_name = name
+        litellm_registered = False
+        litellm_url = ""
+        litellm_api_key = ""
+
+        try:
+            req = urllib.request.Request(f"{server_url}/admin/info")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                info = json.loads(resp.read())
+                current_model_name = info.get("model_name", name)
+                ll = info.get("litellm", {})
+                litellm_registered = ll.get("registered", False)
+                litellm_url = ll.get("url", "")
+        except Exception:
+            pass
+
+        if not litellm_api_key:
+            try:
+                from silo.config.loader import load_config
+
+                config = load_config()
+                litellm_api_key = config.litellm.api_key
+                if not litellm_url:
+                    litellm_url = config.litellm.url
+            except Exception:
+                pass
+
+        from silo.tui.widgets.edit_server_modal import EditServerModal
+
+        def on_edit(result) -> None:
+            if result is not None:
+                self._do_cluster_update(name, worker_host, model_port, result)
+
+        self.app.call_from_thread(
+            self.app.push_screen,
+            EditServerModal(
+                name=name,
+                current_model_name=current_model_name,
+                current_port=model_port,
+                litellm_registered=litellm_registered,
+                litellm_url=litellm_url,
+                litellm_api_key=litellm_api_key,
+            ),
+            on_edit,
+        )
+
+    @work(thread=True)
+    def _do_cluster_update(
+        self, name: str, worker_host: str, model_port: int, update,
+    ) -> None:
+        """Apply edit modal changes to a model server in the cluster."""
+        import json
+        import urllib.request
+
+        server_url = f"http://{worker_host}:{model_port}"
+        changes: list[str] = []
+
+        try:
+            if update.litellm_enabled is True:
+                from silo.litellm.registry import normalize_litellm_url
+
+                data: dict[str, str] = {"url": normalize_litellm_url(update.litellm_url)}
+                if update.litellm_api_key:
+                    data["api_key"] = update.litellm_api_key
+                body = json.dumps(data).encode()
+                req = urllib.request.Request(
+                    f"{server_url}/admin/litellm/register",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    json.loads(resp.read())
+                changes.append("LiteLLM registered")
+
+            elif update.litellm_enabled is False:
+                body = json.dumps({}).encode()
+                req = urllib.request.Request(
+                    f"{server_url}/admin/litellm/deregister",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    json.loads(resp.read())
+                changes.append("LiteLLM deregistered")
+
+            if update.model_name:
+                body = json.dumps({"model_name": update.model_name}).encode()
+                req = urllib.request.Request(
+                    f"{server_url}/admin/model-name",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="PUT",
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    json.loads(resp.read())
+                changes.append(f"renamed to '{update.model_name}'")
+
+            if update.port:
+                changes.append(f"port change to {update.port} requires local restart")
+
+            if changes:
+                self.app.call_from_thread(
+                    self.notify, f"Updated {name}: {', '.join(changes)}"
+                )
+            else:
+                self.app.call_from_thread(
+                    self.notify, "No changes applied", severity="warning"
+                )
+        except Exception as exc:
+            self.app.call_from_thread(
+                self.notify, f"Update failed: {exc}", severity="error"
             )
 
         self._load_data()

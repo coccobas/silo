@@ -45,17 +45,47 @@ def normalize_litellm_url(url: str) -> str:
     return f"{scheme}://{host}:{port}"
 
 
-def resolve_api_base(host: str, port: int) -> str:
+def _detect_netbird_fqdn() -> str | None:
+    """Try to get the NetBird FQDN from `netbird status`."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["netbird", "status"],
+            capture_output=True, text=True, timeout=3,
+        )
+        for line in result.stdout.splitlines():
+            if line.strip().startswith("FQDN:"):
+                fqdn = line.split(":", 1)[1].strip()
+                if fqdn:
+                    return fqdn
+    except Exception:
+        pass
+    return None
+
+
+def resolve_api_base(host: str, port: int, advertise_host: str = "") -> str:
     """Build an externally-reachable api_base URL.
 
-    Replaces localhost/wildcard bind addresses with the machine's
-    actual IP (preferring VPN addresses for cross-network access).
+    Resolution order:
+    1. ``advertise_host`` from config (explicit override)
+    2. NetBird FQDN (auto-detected, stable across IP changes)
+    3. VPN/LAN IP via ``_detect_local_ip()``
+
+    Only triggers for localhost/wildcard bind addresses.
     """
     resolved = host
     if host in ("127.0.0.1", "0.0.0.0", "localhost", "::1"):
-        from silo.agent.daemon import _detect_local_ip
+        if advertise_host:
+            resolved = advertise_host
+        else:
+            fqdn = _detect_netbird_fqdn()
+            if fqdn:
+                resolved = fqdn
+            else:
+                from silo.agent.daemon import _detect_local_ip
 
-        resolved = _detect_local_ip()
+                resolved = _detect_local_ip()
     return f"http://{resolved}:{port}/v1"
 
 
@@ -71,7 +101,7 @@ def register_model(
         return
     try:
         client = LitellmClient(config.url, config.api_key)
-        api_base = resolve_api_base(host, port)
+        api_base = resolve_api_base(host, port, advertise_host=config.advertise_host)
         client.register(model_name, api_base, instance_id)
     except Exception:
         logger.warning("Failed to register '%s' with LiteLLM", model_name, exc_info=True)

@@ -56,8 +56,9 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
     litellm_url = os.environ.get("SILO_LITELLM_URL")
     litellm_key = os.environ.get("SILO_LITELLM_API_KEY")
     litellm_enabled = os.environ.get("SILO_LITELLM_ENABLED")
+    litellm_advertise = os.environ.get("SILO_LITELLM_ADVERTISE_HOST")
 
-    if litellm_url or litellm_key or litellm_enabled is not None:
+    if litellm_url or litellm_key or litellm_enabled is not None or litellm_advertise:
         litellm_overrides: dict[str, object] = {**config.litellm.model_dump()}
         if litellm_url:
             litellm_overrides["url"] = litellm_url
@@ -65,6 +66,8 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
             litellm_overrides["api_key"] = litellm_key
         if litellm_enabled is not None:
             litellm_overrides["enabled"] = litellm_enabled.lower() in ("1", "true", "yes")
+        if litellm_advertise:
+            litellm_overrides["advertise_host"] = litellm_advertise
         updated_litellm = LitellmConfig(**litellm_overrides)
     else:
         updated_litellm = config.litellm
